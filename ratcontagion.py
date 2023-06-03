@@ -68,7 +68,6 @@ class RatExperiment:
         ------------
         Pay attention:
             There are no static or class methods in this class, all methods are instance methods.
-            
         """
 
         self.input_path = input_path
