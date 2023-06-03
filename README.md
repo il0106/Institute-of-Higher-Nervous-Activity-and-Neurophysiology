@@ -12,6 +12,7 @@ The main module (yet) is 'ratcontagion'. This module containes RatExperiment cla
 - Processing the data slicing as you want
 - Creating static (via pyvis) and dynamic (via plotly time slider) graphs describing behavioral contagion among rats in the Intellicage
 - Analyzing the number of visits of rats, their time intervals between visits in various slices making histograms
+- Building your own modified classes and functions 
 ### Where should you start?
 1) Learn more about behavioral contagion
 2) Read about Intellicage and it's output files
