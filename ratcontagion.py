@@ -1,4 +1,4 @@
-# Copyright 2023 Starkov Ilya. All Rights Reserved.
+# Copyright 2023 Ilya Starkov. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -26,13 +26,21 @@ import plotly.graph_objects as go
 import copy
 import pymice as pm
 import networkx as nx
+import random
+import scipy.stats as stats
+from collections import defaultdict
+from copy import deepcopy
+from datetime import datetime
+from functools import reduce
 
-class RatExperiment:
+
+class RBCA:
     def __init__(self,
-                 input_path: str,
-                 output_path: str,
-                 name_animal_file: str,
-                 dict_names: dict,
+                 input_path: str = None,
+                 output_path: str = None,
+                 name_animal_file: str = None,
+                 dict_names: dict = None,
+                 corners: list = None,
                  show_warnings: bool = True):
         """
         ------------ 
@@ -42,7 +50,7 @@ class RatExperiment:
         Parameters:
             input_path: str
                 Path to the folder where are the necessary files.
-                You can define zipped or non zipped folders. But if you prefer to work with the Intellicage archives,
+                You can define zipped or non zipped folders. But if you prefer to work with the IntelliCage archives,
                 then your folder need to be non zipped.
                 Example: r"C:/Users/...input" (the slashes were flipped for this example)
             output_path: str
@@ -68,20 +76,29 @@ class RatExperiment:
         ------------
         Pay attention:
             There are no static or class methods in this class, all methods are instance methods.
-            
         """
 
         self.input_path = input_path
         self.output_path = output_path
         self.name_animal_file = name_animal_file
         self.dict_names = dict_names
-        self.dict_with_medians = {}
+        self.corners = corners
+        self.log = {'medians': {},
+                    'graph_analysis': defaultdict(list),
+                    'unique tags (file)': {},
+                    'demonstrators': {}}
 
         if not show_warnings:
             warnings.filterwarnings("ignore")
 
-    @staticmethod
-    def date_transformer(df,
+    def to_log(self,
+               record: str):
+        file_name = f'{self.output_path}\\log.txt'
+        with open(file_name, 'a', newline='', encoding='utf-8') as f:
+            f.write(f'{datetime.now()}_________________________ {record}\n')
+
+    def date_transformer(self,
+                         df,
                          column_with_date: str):
         """
         ------------
@@ -119,7 +136,7 @@ class RatExperiment:
                         if i[-2:] == _date[0] or i[-2:] == '0' + _date[0]:
                             sup_list.append(i)
                 else:
-                    print(f'\nError (func - date_transformer): date = {date}, sup_list = {sup_list}.')
+                    self.to_log(f'\nError (func - date_transformer): date = {date}, sup_list = {sup_list}.')
         return sup_list
 
     @staticmethod
@@ -138,7 +155,7 @@ class RatExperiment:
             shift_time: Any
                 Shifted time of some moment
             illum: float
-                Value of illumination from the Intellicage output archive
+                Value of illumination from the IntelliCage output archive
             shift_illum: float
                 Shifted value of illumination                 
         ------------
@@ -155,17 +172,16 @@ class RatExperiment:
     def intellicage_parser(self,
                            input_path: str,
                            name_base: str,
-                           illumination='all_time',
-                           condition: dict = None):
+                           illumination='all_time'):
         """
         ------------
         Function:
-            Function to upload data from the Intellicage output archives (.zip files).
+            Function to upload data from the IntelliCage output archives (.zip files).
         ------------
         Parameters:
             input_path: str
                 Path to the folder where are the necessary files.
-                You can define zipped or non zipped folders. But if you prefer to work with the Intellicage archives,
+                You can define zipped or non zipped folders. But if you prefer to work with the IntelliCage archives,
                 then your folder need to be non zipped.
                 Example: r"C:/Users/...input" (the slashes were flipped for this example)
             name_base: str
@@ -173,7 +189,7 @@ class RatExperiment:
             illumination: True or False or 'all_time'
                 If it is True, you will upload data only with non-zero illumination values (daylight time).
                 If it is False, you will upload data only with zero illumination values (nighttime).
-                If it is 'all_time', you will upload all available data from the Intellicage archive.
+                If it is 'all_time', you will upload all available data from the IntelliCage archive.
                 Default value is 'all_time'.
             condition: dict
                 Dictionary where keys are parameters (triggers, flags etc.), and values are
@@ -185,14 +201,14 @@ class RatExperiment:
                 If you do not want to define any conditions, just do not change the default value.  
         ------------
         Return:
-            pandas.DataFrame (with visit data from the Intellicage)
+            pandas.DataFrame (with visit data from the IntelliCage)
         ------------
         Pay attention:
             This method include tools from PyMICE:
                 Loader,
                 getVisits,
                 getEnvironment
-            Please, read more about the Intellicage, and it's output files:
+            Please, read more about the IntelliCage, and it's output files:
             https://www.tse-systems.com/service/intellicage/
             And PyMICE tools: https://github.com/Neuroinflab/PyMICE
         """
@@ -329,45 +345,31 @@ class RatExperiment:
                 else:
                     output_visits = sup_visits_
             else:
-                print(f'\nError in daylight time intervals: start_dark: {start_i}, end_dark: {end_i}.')
+                self.to_log(f'\nError in daylight time intervals: start_dark: {start_i}, end_dark: {end_i}.')
         else:
             output_visits = visits
-        # =========================================================== customizable
-        if condition is not None and len(output_visits) > 0:
-            if name_base.split()[-1] in list(condition.keys()):
-                for key in list(condition.keys()):
-                    if name_base.split()[-1] == key:
-                        if condition[key] == 'last_day':
-                            last_day = sorted(list(output_visits['StartDate'].unique()))[-1]
-                            output_visits = output_visits[output_visits['StartDate'] == last_day]
-                        elif condition[key] == 'first_day':
-                            first_day = sorted(list(output_visits['StartDate'].unique()))[0]
-                            output_visits = output_visits[output_visits['StartDate'] == first_day]
-            if 'date' in list(condition.keys()):
-                spec_date = condition['date']
-                output_visits = output_visits[output_visits['StartDate'] == spec_date]
-        # ===========================================================
 
         return output_visits
 
     def parser(self,
                name_base: str,
+               name_stage: str,
                name_group: str,
                name_animal: str,
                input_path: str,
                without_lik: bool = False,
                only_with_lick: bool = False,
                time: float = None,
-               verbose: bool = False,
                without_dem: bool = False,
                time_start: str = None,
                time_finish: str = None,
-               intellicage: dict = None):
+               intellicage=None,
+               condition=None):
         """
         ------------
         Function:
             Parsing your html-file (that is built via the IntelliCage) or
-            parsing original Intellicage output archives.
+            parsing original IntelliСage output archives.
         ------------
         Parameters:
             name_base: str
@@ -383,7 +385,7 @@ class RatExperiment:
                 Example: 'Animal' (it must be a html-file)
             input_path: str
                 Path to the folder where are the necessary files.
-                You can define zipped or non zipped folders. But if you prefer to work with the Intellicage archives,
+                You can define zipped or non zipped folders. But if you prefer to work with the IntelliCage archives,
                 then your folder need to be non zipped.
                 Example: r"C:/Users/...input" (the slashes were flipped for this example)
             without_lik: bool
@@ -411,7 +413,11 @@ class RatExperiment:
                 finish time
                 in the file, 'start_time' will be equal to the original start time). Default value is None.
                 Example: '12:30:45'
-            intellicage: dict
+            intellicage: bool or 'all_time'
+
+                Example: True, False or 'all_time'
+
+            dict
                 It is dictionary where you put intellicage_parser's parameters (See the 'intellicage_parser' method).
                 Default value is None.
                 Example: {'illumination':'all_time', 
@@ -419,6 +425,8 @@ class RatExperiment:
                                         'session2':'last_day',
                                         'session3':'first_day',
                                         'date':time}}
+            condition: dict
+                The same signature as 'condition' in the intellicage parameter of the parser method.
         ------------
         Return:
             DataFrame with behavioral data,
@@ -433,30 +441,29 @@ class RatExperiment:
                         if inner_file_name[-4:] == 'html':
                             base = pd.read_html(z.open(f'{name_base}.html'), header=1)[0]
                         else:
-                            print(f'\nThere is no file {name_base}.html in directory {input_path}')
+                            self.to_log(f'\nThere is no file {name_base}.html in directory {input_path}')
                     elif inner_file_name[:len(name_animal)] == name_animal:
                         if inner_file_name[-4:] == 'html':
                             raw_animal = pd.read_html(z.open(f'{name_animal}.html'), header=1)[0]
                         else:
-                            print(f'\nThere is no file {name_animal}.html in directory {input_path}')
+                            self.to_log(f'\nThere is no file {name_animal}.html in directory {input_path}')
         else:
             for inner_file_name in (next(os.walk(input_path), (None, None, []))[2]):
                 if inner_file_name[:len(name_base)] == name_base:
                     if intellicage is not None:
                         base = self.intellicage_parser(input_path=input_path,
                                                        name_base=name_base,
-                                                       illumination=intellicage['illumination'],
-                                                       condition=intellicage['condition'])
+                                                       illumination=intellicage)
                     elif inner_file_name[-4:] == 'html':
                         base = pd.read_html(f'{input_path}\\{name_base}.html', header=1)[0]
                     else:
-                        print(f'\nThere is no file {name_base} in directory {input_path}')
+                        self.to_log(f'\nThere is no file {name_base} in directory {input_path}')
 
                 elif inner_file_name[:len(name_animal)] == name_animal:
                     if inner_file_name[-4:] == 'html':
                         raw_animal = pd.read_html(f'{input_path}\\{name_animal}.html', header=1)[0]
                     else:
-                        print(f'\nThere is no file {name_animal}.html in directory {input_path}')
+                        self.to_log(f'\nThere is no file {name_animal}.html in directory {input_path}')
 
         if intellicage is None:
             base['_StartDate'] = self.date_transformer(base, 'StartDate')
@@ -464,9 +471,43 @@ class RatExperiment:
 
             base['_StartTime'] = pd.to_datetime(base['_StartDate'] + '_' + base['StartTime'],
                                                 format='%Y-%m-%d_%H:%M:%S.%f')
-            base['_EndTime'] = pd.to_datetime(base['_EndDate'] + '_' + base['EndTime'], format='%Y-%m-%d_%H:%M:%S.%f')
+            base['_EndTime'] = pd.to_datetime(base['_EndDate'] + '_' + base['EndTime'],
+                                              format='%Y-%m-%d_%H:%M:%S.%f')
 
             base['VisitDuration'] = pd.to_numeric(base['VisitDuration'])
+
+        # =========================================================== customizable
+        if condition is not None and len(base) > 0:
+            for stage in condition.keys():
+                if stage == name_stage:
+                    for file_name in condition[stage]:
+                        if file_name == name_base:
+                            if condition[stage][file_name] == 'last_day':
+                                last_day = sorted(list(base['StartDate'].unique()))[-1]
+                                base = base[base['StartDate'] == last_day]
+                            elif condition[stage][file_name] == 'first_day':
+                                first_day = sorted(list(base['StartDate'].unique()))[0]
+                                base = base[base['StartDate'] == first_day]
+                            elif condition[stage][file_name] == 'second_day':
+                                second_day = sorted(list(base['StartDate'].unique()))[1]
+                                base = base[base['StartDate'] == second_day]
+                            elif condition[stage][file_name][:4] == 'time':
+                                condition_sup_list = condition[stage][file_name].split('|')
+                                condition_start = condition_sup_list[1]
+                                condition_finish = condition_sup_list[2]
+
+                                if len(condition_start) > 8 or len(condition_finish) > 8:
+                                    start = pd.to_datetime(condition_start, format='%Y-%m-%d_%H:%M:%S')
+                                    finish = pd.to_datetime(condition_finish, format='%Y-%m-%d_%H:%M:%S')
+                                    base = base.loc[(base['_StartTime'] <= finish) & (base['_StartTime'] >= start)]
+                                else:
+                                    self.to_log(
+                                        f'Error when entering time in the condition in {name_base} of {name_stage}.')
+
+            if 'date' in condition.keys():
+                spec_date = condition['date']
+                base = base[base['StartDate'] == spec_date]
+        # ===========================================================
 
         dems = list(set(list(raw_animal.loc[(raw_animal['Protocol'] == 'new') & (raw_animal['Demostrator'] == 1) & (
                 raw_animal['Group'] == name_group), 'Animal ID'])))
@@ -474,13 +515,16 @@ class RatExperiment:
         dem_in_base = []
         base_list = list(base['Tag'].unique())
 
+        unique_tag_list = deepcopy(base_list)
+
         for i in dems:
             if i in base_list:
                 dem_in_base.append(i)
                 if without_dem:
                     base_list.remove(i)
-        if verbose:
-            print(f'\nThe demonstrator in {name_base} - {dem_in_base}')
+
+        self.log['demonstrators'][name_base] = dem_in_base
+        self.to_log(f'\nThe demonstrator in {name_base} - {dem_in_base}')
 
         base.index = base['Tag']
 
@@ -489,35 +533,42 @@ class RatExperiment:
         else:
             base_out_dem = base
 
+        self.log['unique tags (file)'][name_base] = unique_tag_list
+
         if time is not None and (time_start is None and time_finish is None):
             start = pd.Timestamp(sorted(list(base['_StartTime']))[0])
             finish = start + pd.offsets.DateOffset(minutes=time)
             base_out_dem = base_out_dem.loc[base_out_dem['_StartTime'] <= finish]
-            if verbose:
-                print(f'\nStart time of downloadling {name_base} = {start}, the end of download = {finish}.')
+            self.to_log(f'\nStart time of downloading {name_base} = {start}, the end of download = {finish}.')
 
         if time_start is not None and time_finish is not None:
-            if len(base['StartDate'].unique()) > 1:
-                print(f'''\nAttention: number of unique dates in "StartDate" more than one.\
-                    \rData with this exception: {name_base}.\
-                    \rIt will be used the first date for date analysis and comparison.''')
 
-            start = pd.to_datetime(sorted(list(base['StartDate'].unique()))[0] + '_' + time_start,
-                                   format='%Y-%m-%d_%H:%M:%S')
-            finish = pd.to_datetime(sorted(list(base['StartDate'].unique()))[0] + '_' + time_finish,
-                                    format='%Y-%m-%d_%H:%M:%S')
+            if len(time_start) > 8 or len(time_finish) > 8:
+                start = pd.to_datetime(time_start, format='%Y-%m-%d_%H:%M:%S')
+                finish = pd.to_datetime(time_finish, format='%Y-%m-%d_%H:%M:%S')
+            else:
+                if len(base['StartDate'].unique()) > 1:
+                    self.to_log(f'''\nAttention: number of unique dates in "StartDate" more than one.
+                        \rData with this exception: {name_base}.
+                        \rIt will be used the first date for date analysis and comparison.''')
+
+                start = pd.to_datetime(sorted(list(base['StartDate'].unique()))[0] + '_' + time_start,
+                                       format='%Y-%m-%d_%H:%M:%S')
+                finish = pd.to_datetime(sorted(list(base['StartDate'].unique()))[0] + '_' + time_finish,
+                                        format='%Y-%m-%d_%H:%M:%S')
+
             try:
                 base_out_dem = base_out_dem.loc[
                     (base_out_dem['_StartTime'] <= finish) & (base_out_dem['_StartTime'] >= start)]
             except:
                 if sorted(list(base['_StartTime'].unique()))[0] > start:
-                    print(f'\nError during preprocessing of {name_base}:')
-                    print(
+                    self.to_log(f'\nError during preprocessing of {name_base}:')
+                    self.to_log(
                         'Parameter "time_start" is less than the real start time of the data. The first date will be used as a time_start.')
                     start = pd.Timestamp(sorted(list(base['_StartTime']))[0])
                 if sorted(list(base['_StartTime'].unique()))[-1] < finish:
-                    print(f'\nError during preprocessing of {name_base}:')
-                    print(
+                    self.to_log(f'\nError during preprocessing of {name_base}:')
+                    self.to_log(
                         'Parameter "time_finish" is bigger than the real finish time of the data. Last date will be used as a time_finish.')
                     finish = pd.Timestamp(sorted(list(base['_StartTime']))[-1])
 
@@ -529,13 +580,11 @@ class RatExperiment:
                 finish = start + pd.offsets.DateOffset(minutes=time)
                 base_out_dem = base_out_dem.loc[base_out_dem['_StartTime'] <= finish]
 
-            if verbose:
-                print(f'\nStart time of downloadling {name_base} = {start}, the end of download = {finish}.')
+            self.to_log(f'\nStart time of downloading {name_base} = {start}, the end of download = {finish}.')
         else:
-            if verbose:
-                start = pd.Timestamp(sorted(list(base['_StartTime']))[0])
-                finish = pd.Timestamp(sorted(list(base['_StartTime']))[-1])
-                print(f'\nStart time of downloadling {name_base} = {start}, the end of download = {finish}.')
+            start = pd.Timestamp(sorted(list(base['_StartTime']))[0])
+            finish = pd.Timestamp(sorted(list(base['_StartTime']))[-1])
+            self.to_log(f'\nStart time of downloading {name_base} = {start}, the end of download = {finish}.')
 
         if without_lik:
             base_out_dem = base_out_dem[base_out_dem['LickNumber'] == 0]
@@ -630,16 +679,47 @@ class RatExperiment:
 
         return sup_dict
 
+    @staticmethod
+    def combiner(dict1: dict,
+                 dict2: dict):
+        """
+        :param dict1:
+        :param dict2:
+        :return:
+        """
+        if dict1 is not None and len(dict1) > 0 and dict2 is not None and len(dict2) > 0:
+            sup_dict_both = {}
+            for k, v in dict1.items():
+                if k in dict2.keys():
+                    for r, t in dict2.items():
+                        if k == r:
+                            v = v.reset_index()
+                            t = t.reset_index()
+                            df = pd.concat([v, t], ignore_index=True)
+                            df = df.groupby('index').sum()
+                            sup_dict_both[k] = df
+
+                elif k not in dict2.keys():
+                    sup_dict_both[k] = v
+            for r, t in dict2.items():
+                if r not in dict1.keys():
+                    sup_dict_both[r] = t
+        elif dict1 is None or len(dict1) == 0 and dict2 is not None and len(dict2) > 0:
+            sup_dict_both = dict2
+        elif dict2 is None or len(dict2) == 0 and dict1 is not None and len(dict1) > 0:
+            sup_dict_both = dict2
+        else:
+            sup_dict_both = None
+
+        return sup_dict_both
+
     def frame_analysis_for_graph(self,
                                  data,
-                                 data_,
                                  tags: list,
                                  dem_tags: list,
                                  time_interval: float,
                                  net,
-                                 regime='both',
-                                 data2=None,
-                                 data_2=None,
+                                 corners: list = None,
                                  dynamic: bool = False,
                                  name_of_group: str = '_'):
         """
@@ -690,73 +770,48 @@ class RatExperiment:
         """
 
         name_column = f'Visits in {name_of_group}'
-        sup_dict = self.inner_analysis(data, data_, tags, time_interval, name_of_group)
 
-        if regime != 'both':
-            if not dynamic:
-                for k, v in sup_dict.items():
-                    if k in dem_tags:
-                        net.add_node(int(k), label=str(k), color='yellow', title=f'{v}')
-                    else:
-                        net.add_node(int(k), label=str(k), color='red', title=f'{v}')
+        corners_dict = dict.fromkeys(corners)
+        for corner in corners:
+            data_of_corner = data[data['Corner'] == corner]
+            corners_dict[corner] = self.inner_analysis(data_of_corner,
+                                                       data_of_corner.copy(),
+                                                       tags,
+                                                       time_interval,
+                                                       name_of_group)
 
-                sup_graph_list = []
-                for k, v in sup_dict.items():
-                    for tag in v.index:
-                        if v.loc[tag, name_column] == 0:
-                            sup_graph_list.append([k, tag])
-                        else:
-                            net.add_edge(int(k), int(tag), value=0.01 * int(v.loc[tag, name_column]), color='blue')
-                for pair in sup_graph_list:
-                    net.add_edge(int(pair[0]), int(pair[1]), hidden=True)
-            return sup_dict
-
+        if len(corners) >= 2:
+            final_dict = reduce(self.combiner, list(corners_dict.values()))
+        elif len(corners) == 0:
+            final_dict = None
         else:
-            sup_dict2 = self.inner_analysis(data2, data_2, tags, time_interval, name_of_group)
+            final_dict = list(corners_dict.values())[0]
 
-            sup_dict_both = {}
-            for k, v in sup_dict.items():
-                if k in sup_dict2.keys():
-                    for r, t in sup_dict2.items():
-                        if k == r:
-                            v = v.reset_index()
-                            t = t.reset_index()
-                            df = pd.concat([v, t], ignore_index=True)
-                            df = df.groupby('index').sum()
-                            sup_dict_both[k] = df
+        # --------------------------------------------------
+        if not dynamic:
+            for k, v in final_dict.items():
+                if k in dem_tags:
+                    net.add_node(int(k), label=str(k), color='yellow', title=f'{v}')
+                else:
+                    net.add_node(int(k), label=str(k), color='red', title=f'{v}')
 
-                elif k not in sup_dict2.keys():
-                    sup_dict_both[k] = v
-            for r, t in sup_dict2.items():
-                if r not in sup_dict.keys():
-                    sup_dict_both[r] = t
-
-            # --------------------------------------------------
-            if not dynamic:
-                for k, v in sup_dict_both.items():
-                    if k in dem_tags:
-                        net.add_node(int(k), label=str(k), color='yellow', title=f'{v}')
+            sup_graph_list = []
+            for k, v in final_dict.items():
+                for tag in v.index:
+                    if v.loc[tag, name_column] == 0:
+                        sup_graph_list.append([k, tag])
                     else:
-                        net.add_node(int(k), label=str(k), color='red', title=f'{v}')
+                        net.add_edge(int(k), int(tag), value=0.01 * int(v.loc[tag, name_column]), color='blue')
+            for pair in sup_graph_list:
+                net.add_edge(int(pair[0]), int(pair[1]), hidden=True)
 
-                sup_graph_list = []
-                for k, v in sup_dict_both.items():
-                    for tag in v.index:
-                        if v.loc[tag, name_column] == 0:
-                            sup_graph_list.append([k, tag])
-                        else:
-                            net.add_edge(int(k), int(tag), value=0.01 * int(v.loc[tag, name_column]), color='blue')
-                for pair in sup_graph_list:
-                    net.add_edge(int(pair[0]), int(pair[1]), hidden=True)
-
-            return sup_dict_both
+        return final_dict
 
     def graph(self,
               input_data,
               tags: list,
               dem_tags: list,
               net,
-              corners='both',
               time_interval: float = None,
               dynamic: bool = False,
               name_of_group: str = '_'):
@@ -796,109 +851,28 @@ class RatExperiment:
             Dictionary where keys are rat tags and each value is a pandas.DataFrame with followers from all cases.
         """
 
-        data = input_data.copy()
-        graph_dict = None
-
-        if corners == 'both':
-            if len(list(input_data['Corner'].unique())) == 2:
-                data1 = data[data['Corner'] == 1]
-                data_1 = data1.copy()
-                data2 = data[data['Corner'] == 2]
-                data_2 = data2.copy()
-
-                graph_dict = self.frame_analysis_for_graph(data1,
-                                                           data_1,
-                                                           tags,
-                                                           dem_tags,
-                                                           time_interval,
-                                                           net,
-                                                           regime='both',
-                                                           data2=data2,
-                                                           data_2=data_2,
-                                                           dynamic=dynamic,
-                                                           name_of_group=name_of_group)
-
-            elif 1 in list(input_data['Corner'].unique()) and 2 not in list(input_data['Corner'].unique()):
-                print(f'''\nThere is no data on the second drinking bowl in the next slice:\
-                \rName of the group: {name_of_group}\
-                \rData: {input_data.head()}\
-                \rTags: {tags}\
-                \nThe first drinking bowl will be selected.''')
-
-                data1 = data[data['Corner'] == 1]
-                data_1 = data1.copy()
-
-                graph_dict = self.frame_analysis_for_graph(data1,
-                                                           data_1,
-                                                           tags,
-                                                           dem_tags,
-                                                           time_interval,
-                                                           net,
-                                                           dynamic=dynamic,
-                                                           name_of_group=name_of_group)
-
-            elif 1 not in list(input_data['Corner'].unique()) and 2 in list(input_data['Corner'].unique()):
-                print(f'''\nThere is no data on the first drinking bowl in the next slice:\
-                \rName of the group: {name_of_group}\
-                \rData: {input_data.head()}\
-                \rTags: {tags}\
-                \nThe second drinking bowl will be selected.''')
-
-                data2 = data[data['Corner'] == 2]
-                data_2 = data2.copy()
-
-                graph_dict = self.frame_analysis_for_graph(data2,
-                                                           data_2,
-                                                           tags,
-                                                           dem_tags,
-                                                           time_interval,
-                                                           net,
-                                                           dynamic=dynamic,
-                                                           name_of_group=name_of_group)
-
-            elif 1 not in list(input_data['Corner'].unique()) and 2 not in list(input_data['Corner'].unique()):
-                print(f'''\nThere is no data on both drinking bowls in the next slice:\
-                \rName of the group: {name_of_group}\
-                \rData: {input_data.head()}\
-                \rTags: {tags}''')
-
-        elif corners == 1:
-            if 1 in list(data['Corner'].unique()):
-                data1 = data[data['Corner'] == 1]
-                data_1 = data1.copy()
-
-                graph_dict = self.frame_analysis_for_graph(data1,
-                                                           data_1,
-                                                           tags,
-                                                           dem_tags,
-                                                           time_interval,
-                                                           net,
-                                                           dynamic=dynamic,
-                                                           name_of_group=name_of_group)
+        corners_list = []
+        for corner in self.corners:
+            if corner not in list(input_data['Corner'].unique()):
+                self.to_log(f'''\nThere is no data on the {corner} corner in the next slice:
+                                \rName of the group: {name_of_group}
+                                \rData: {input_data.head()}
+                                \rTags: {tags}
+                                \nThe analysis will be performed without this corner.''')
             else:
-                print(f'''\nThere is no data on the first drinking bowl in the next slice:\
-                \rName of the group: {name_of_group}\
-                \rData: {input_data.head()}\
-                \rTags: {tags}''')
+                corners_list.append(corner)
 
-        elif corners == 2:
-            if 2 in list(data['Corner'].unique()):
-                data2 = data[data['Corner'] == 2]
-                data_2 = data2.copy()
-
-                graph_dict = self.frame_analysis_for_graph(data2,
-                                                           data_2,
-                                                           tags,
-                                                           dem_tags,
-                                                           time_interval,
-                                                           net,
-                                                           dynamic=dynamic,
-                                                           name_of_group=name_of_group)
-            else:
-                print(f'''\nThere is no data on the second drinking bowl in the next slice:\
-                \rName of the group: {name_of_group}\
-                \rData: {input_data.head()}\
-                \rTags: {tags}''')
+        if len(corners_list) > 0:
+            graph_dict = self.frame_analysis_for_graph(data=input_data,
+                                                       tags=tags,
+                                                       dem_tags=dem_tags,
+                                                       time_interval=time_interval,
+                                                       net=net,
+                                                       corners=corners_list,
+                                                       dynamic=dynamic,
+                                                       name_of_group=name_of_group)
+        else:
+            graph_dict = None
 
         return graph_dict
 
@@ -910,15 +884,16 @@ class RatExperiment:
              time: float = None,
              time_start: str = None,
              time_finish: str = None,
+             time_start_median: str = None,
+             time_finish_median: str = None,
              replacing_value: float = None,
-             median_all_time: bool = True,
+             median_special_time: bool = True,
              delete_zero_in_intervals_for_median: bool = True,
              input_time_interval=None,
-             corners='both',
              without_dem_base: bool = False,
-             verbose: bool = True,
              dynamic: bool = False,
-             intellicage: dict = None):
+             intellicage=None,
+             parser_condition: dict = None):
         """
         ------------
         Function:
@@ -945,7 +920,7 @@ class RatExperiment:
                 Float number of seconds. The number of seconds after each visit during which the visits of followers are
                 counted. Default value is None.
                 Example: 12,4 or 30
-            median_all_time: bool
+            median_special_time: bool
                 Way to calculate the median of visits. If True, it is evaluated on all data connected with the
                 particular group. Default value is True.
                 Example: True or False
@@ -980,8 +955,7 @@ class RatExperiment:
              Example: (pandas.DataFrame, list(dict1(), dict2(), dict3()), list)
         """
 
-        if verbose:
-            print(f'\n======= {title_of_stage} =======')
+        self.to_log(f'\n======= {title_of_stage} =======')
 
         bases = {}
         bases_tags = {}
@@ -993,21 +967,22 @@ class RatExperiment:
             bases[name_base], \
             bases_tags[name_base], \
             bases_dems[name_base] = self.parser(name_base=name_base,
+                                                name_stage=title_of_stage,
                                                 name_animal=self.name_animal_file,
                                                 input_path=self.input_path,
                                                 name_group=name_group,
                                                 without_lik=without_lik,
                                                 only_with_lick=only_with_lick,
                                                 time=time,
-                                                verbose=verbose,
                                                 without_dem=without_dem_base,
                                                 time_start=time_start,
                                                 time_finish=time_finish,
-                                                intellicage=intellicage)
+                                                intellicage=intellicage,
+                                                condition=parser_condition)
 
-        if median_all_time:  # special computing space
-            if verbose:
-                print('Special calculations (median over the whole time, for each group).')
+        if median_special_time:  # special computing space
+            self.to_log('Special calculations (median over the whole time, for each group).')
+
             bases_all = {}
             bases_tags_all = {}
             bases_dems_all = {}
@@ -1017,17 +992,18 @@ class RatExperiment:
                 bases_all[name_base], \
                 bases_tags_all[name_base], \
                 bases_dems_all[name_base] = self.parser(name_base=name_base,
+                                                        name_stage=title_of_stage,
                                                         name_animal=self.name_animal_file,
                                                         input_path=self.input_path,
                                                         name_group=name_group,
                                                         without_lik=without_lik,  # attention
                                                         only_with_lick=only_with_lick,  # attention
                                                         time=None,
-                                                        verbose=False,
                                                         without_dem=False,  # attention
-                                                        time_start=None,
-                                                        time_finish=None,
-                                                        intellicage=intellicage)
+                                                        time_start=time_start_median,
+                                                        time_finish=time_finish_median,
+                                                        intellicage=intellicage,
+                                                        condition=parser_condition)
             sup_bases_all = []
             for i in bases_tags_all.values():
                 for j in i:
@@ -1081,8 +1057,7 @@ class RatExperiment:
             else:
                 base_.loc[tag, f'{title_of_stage}_intervals'] = diff
 
-            if verbose:
-                print(f'{tag} : {diff}')
+            self.to_log(f'{tag} : {diff}')
 
         base = base_
 
@@ -1104,7 +1079,7 @@ class RatExperiment:
 
             time_interval_list = []
             for tag in tags:
-                if median_all_time:
+                if median_special_time:
                     i = base_all[tag]
                 else:
                     i = base[tag]
@@ -1122,10 +1097,9 @@ class RatExperiment:
                         else:
                             time_interval_list.append(j)
             time_interval = np.median(time_interval_list)
-            self.dict_with_medians[f'{k} ({title_of_stage})'] = time_interval
+            self.log['medians'][f'{k} ({title_of_stage})'] = time_interval
 
-            if verbose:
-                print(f'Median in {k} = {time_interval}')
+            self.to_log(f'Median in {k} = {time_interval}')
 
             v.sort_values(by=['_StartTime'], inplace=True)
             if input_time_interval == 'auto':
@@ -1134,18 +1108,16 @@ class RatExperiment:
                                         bases_dems[k],
                                         net,
                                         time_interval=time_interval,
-                                        corners=corners,
                                         dynamic=dynamic,
-                                        name_of_group=k)
+                                        name_of_group=title_of_stage + '_' + k)
             else:
                 graph_dict = self.graph(v,
                                         bases_tags[k],
                                         bases_dems[k],
                                         net,
                                         time_interval=input_time_interval,
-                                        corners=corners,
                                         dynamic=dynamic,
-                                        name_of_group=k)
+                                        name_of_group=title_of_stage + '_' + k)
 
             list_with_dicts[k] = graph_dict
 
@@ -1155,11 +1127,10 @@ class RatExperiment:
                                       ])
             net.save_graph(f'{self.output_path}\\{title_of_stage}_graph.html')
 
-        if verbose:
-            print('\n------- Rat tags in each group -------')
-            for k, v in bases_tags.items():
-                print(k, v)
-            print(base)
+        self.to_log('\n------- Rat tags in each group -------')
+        for k, v in bases_tags.items():
+            self.to_log(f'{k, v}')
+        self.to_log(base)
 
         return base, list_with_dicts, all_dems
 
@@ -1167,17 +1138,18 @@ class RatExperiment:
                   without_lik: bool = False,
                   only_with_lick: bool = False,
                   time: float = None,
-                  verbose: bool = True,
                   replacing_value='auto',
                   without_dem_base: bool = False,
                   input_time_interval='auto',
-                  corners='both',
                   time_start: str = None,
                   time_finish: str = None,
-                  delete_zero_in_intervals_for_median : bool = False,
-                  median_all_time: bool = False,
+                  time_start_median: str = None,
+                  time_finish_median: str = None,
+                  delete_zero_in_intervals_for_median: bool = False,
+                  median_special_time: bool = False,
                   dynamic: bool = False,
-                  intellicage: dict = False):
+                  intellicage=None,
+                  parser_condition: dict = None):
         """
         ------------ 
         Function:
@@ -1224,7 +1196,7 @@ class RatExperiment:
             delete_zero_in_intervals_for_median: bool
                 Deleting zeros in the median calculation or not. Default value is False.
                 Example: True of False            
-            median_all_time: bool
+            median_special_time: bool
                 Way to calculate the median of visits. If True, it is evaluated on all data connected with the
                 particular group. Default value is False.
                 Example: True or False
@@ -1252,14 +1224,17 @@ class RatExperiment:
                           (frame2, dict2, list2)]
         """
 
-        if verbose:
-            print('\n======= Work with graphs (eda_graph) =======')
+        self.to_log('\n======= Work with graphs (eda_graph) =======')
 
         if replacing_value == 'auto':
             if time is None:
                 if time_start is not None and time_finish is not None:
-                    time_start_for_replacing_value = pd.to_datetime(time_start, format='%H:%M:%S')
-                    time_finish_for_replacing_value = pd.to_datetime(time_finish, format='%H:%M:%S')
+                    if len(time_start) > 8 or len(time_finish) > 8:
+                        time_start_for_replacing_value = pd.to_datetime(time_start, format='%Y-%m-%d_%H:%M:%S')
+                        time_finish_for_replacing_value = pd.to_datetime(time_finish, format='%Y-%m-%d_%H:%M:%S')
+                    else:
+                        time_start_for_replacing_value = pd.to_datetime(time_start, format='%H:%M:%S')
+                        time_finish_for_replacing_value = pd.to_datetime(time_finish, format='%H:%M:%S')
                     replacing_value = (time_finish_for_replacing_value - time_start_for_replacing_value).seconds
                 else:
                     replacing_value = 24 * 60 * 60  # whole day
@@ -1273,17 +1248,18 @@ class RatExperiment:
                                          without_lik=without_lik,
                                          only_with_lick=only_with_lick,
                                          time=time,
-                                         verbose=verbose,
                                          without_dem_base=without_dem_base,
                                          dynamic=dynamic,
                                          input_time_interval=input_time_interval,
-                                         corners=corners,
                                          time_start=time_start,
                                          time_finish=time_finish,
+                                         time_start_median=time_start_median,
+                                         time_finish_median=time_finish_median,
                                          delete_zero_in_intervals_for_median=delete_zero_in_intervals_for_median,
-                                         median_all_time=median_all_time,
+                                         median_special_time=median_special_time,
                                          replacing_value=replacing_value,
-                                         intellicage=intellicage
+                                         intellicage=intellicage,
+                                         parser_condition=parser_condition
                                          )
                                )
         return output_list
@@ -1429,7 +1405,7 @@ class RatExperiment:
                         "yanchor": "top",
                         "xanchor": "left",
                         "currentvalue": {"font": {"size": 20},
-                                         "prefix": "Time:",
+                                         "prefix": "Time: ",
                                          "visible": True,
                                          "xanchor": "right"},
                         "transition": {"duration": 300,
@@ -1457,8 +1433,8 @@ class RatExperiment:
         while i < len(trace_list):
             step = {'method': 'update',
                     'args': [{"visible": [False] * len(trace_list)}, ],
-                    'label': str(times[oper_times])[-8:],
-                    'value': str(times[oper_times])[-8:]}
+                    'label': str(times[oper_times]),
+                    'value': str(times[oper_times])}
             inner_oper = 0
             for j in range(len(trace_list)):
                 if i < len(trace_list):
@@ -1483,25 +1459,28 @@ class RatExperiment:
         sliders_dict['steps'] = steps
         fig_dict["layout"]["sliders"] = [sliders_dict]
         fig = go.Figure(fig_dict)
-        fig.write_html(f"{self.output_path}\\{name}.html")
+        fig.write_html(f"{self.output_path}\\dg_{name}.html")
 
     def dynamic_graphs(self,
                        start: str,
                        finish: str,
                        slide: float,
                        step: float,
+                       time_start_median: str = None,
+                       time_finish_median: str = None,
                        without_lik: bool = False,
                        only_with_lick: bool = False,
                        time: float = None,
-                       verbose: bool = False,
                        replacing_value='auto',
                        without_dem_base: bool = False,
                        input_time_interval='auto',
-                       corners='both',
                        delete_zero_in_intervals_for_median: bool = True,
-                       median_all_time: bool = True,
+                       median_special_time: bool = True,
                        dynamic: bool = False,
-                       intellicage: dict = None):
+                       intellicage=None,
+                       parser_condition: dict = None,
+                       stat: bool = True,
+                       division_coef: float = None):
         """
         ------------
         Function:
@@ -1555,7 +1534,7 @@ class RatExperiment:
             delete_zero_in_intervals_for_median: bool
                 Deleting zeros in the median calculation or not. Default value is True.
                 Example: True of False
-            median_all_time: bool
+            median_special_time: bool
                 Way to calculate the median of visits. If True, it is evaluated on all data connected with the
                 particular group. Default value is True.
                 Example: True or False
@@ -1578,8 +1557,13 @@ class RatExperiment:
             Side effects are html-files with graphs.
         """
 
-        start = pd.to_datetime(start, format='%H:%M:%S')
-        end_of_all = pd.to_datetime(finish, format='%H:%M:%S')
+        if len(start) > 8 or len(finish) > 8:
+            start = pd.to_datetime(start, format='%Y-%m-%d_%H:%M:%S')
+            end_of_all = pd.to_datetime(finish, format='%Y-%m-%d_%H:%M:%S')
+        else:
+            start = pd.to_datetime(start, format='%H:%M:%S')
+            end_of_all = pd.to_datetime(finish, format='%H:%M:%S')
+
         slide = pd.offsets.DateOffset(minutes=slide)
         step = pd.offsets.DateOffset(minutes=step)
 
@@ -1588,25 +1572,37 @@ class RatExperiment:
 
         time_dict = {}
         while new_start <= end_of_all - slide:
-            str_new_start = str(new_start)[-8:]
-            str_new_finish = str(new_finish)[-8:]
 
-            data = self.eda_graph(without_lik=without_lik,
-                                  only_with_lick=only_with_lick,
-                                  time=time,
-                                  verbose=verbose,
-                                  replacing_value=replacing_value,
-                                  without_dem_base=without_dem_base,
-                                  input_time_interval=input_time_interval,
-                                  corners=corners,
-                                  time_start=str_new_start,  # pay attention
-                                  time_finish=str_new_finish,  # pay attention
-                                  delete_zero_in_intervals_for_median=delete_zero_in_intervals_for_median,
-                                  median_all_time=median_all_time,
-                                  dynamic=dynamic,
-                                  intellicage=intellicage)
+            str_new_start = str(new_start).replace(' ', '_')
+            str_new_finish = str(new_finish).replace(' ', '_')
 
-            time_dict[new_finish] = data
+            if str_new_start[:4] == '1900' or str_new_finish[:4] == '1900':
+                str_new_start = str_new_start[-8:]
+                str_new_finish = str_new_finish[-8:]
+
+            sup_args = dict(without_lik=without_lik,
+                            only_with_lick=only_with_lick,
+                            time=time,
+                            replacing_value=replacing_value,
+                            without_dem_base=without_dem_base,
+                            input_time_interval=input_time_interval,
+                            time_start=str_new_start,
+                            time_finish=str_new_finish,
+                            time_start_median=time_start_median,
+                            time_finish_median=time_finish_median,
+                            delete_zero_in_intervals_for_median=delete_zero_in_intervals_for_median,
+                            median_special_time=median_special_time,
+                            dynamic=dynamic,
+                            intellicage=intellicage,
+                            parser_condition=parser_condition)
+
+            if stat:
+                data, _ = self.graph_analysis(division_coef=division_coef,
+                                              **sup_args)
+            else:
+                data = self.eda_graph(**sup_args)
+
+            time_dict[str_new_finish] = data
 
             new_start += step
             new_finish += step
@@ -1617,15 +1613,20 @@ class RatExperiment:
 
         for time, data in time_dict.items():
             sup_dict = {}
-            for cortege in data:
+
+            stage_names = self.dict_names.keys()
+            data_for_graph_zipped = list(zip(stage_names, data))
+
+            for stage_name, cortege in data_for_graph_zipped:
                 dems += cortege[2]
 
                 for name, dict_relations in cortege[1].items():
-                    if name not in names:
-                        names.append(name)
-                    sup_dict[name] = self.graph_plotly(dict_relations,
-                                                       cortege[2],
-                                                       name_of_group=name)
+                    sup_name = stage_name + '_' + name
+                    if sup_name not in names:
+                        names.append(sup_name)
+                    sup_dict[sup_name] = self.graph_plotly(dict_relations,
+                                                           cortege[2],
+                                                           name_of_group=sup_name)
             final_time_dict[time] = sup_dict
 
         for name in names:
@@ -1643,17 +1644,18 @@ class RatExperiment:
                        without_lik: bool = False,
                        only_with_lick: bool = False,
                        time: float = None,
-                       verbose: bool = True,
                        replacing_value='auto',
                        without_dem_base: bool = False,
                        input_time_interval='auto',
-                       corners='both',
                        time_start: str = None,
                        time_finish: str = None,
+                       time_start_median: str = None,
+                       time_finish_median: str = None,
                        delete_zero_in_intervals_for_median: bool = True,
-                       median_all_time: bool = True,
+                       median_special_time: bool = True,
                        dynamic: bool = False,
-                       intellicage: dict = None):
+                       intellicage=None,
+                       parser_condition: dict = None):
         """
         ------------
         Function:
@@ -1704,7 +1706,7 @@ class RatExperiment:
             delete_zero_in_intervals_for_median: bool
                 Deleting zeros in the median calculation or not. Default value is True.
                 Example: True of False            
-            median_all_time: bool
+            median_special_time: bool
                 Way to calculate the median of visits. If True, it is evaluated on all data connected with the
                 particular group. Default value is True.
                 Example: True or False            
@@ -1721,42 +1723,67 @@ class RatExperiment:
                                         'date':time}}
         ------------
         Return:
-            Only side effect. Printing all metrics.
+            Dictionary, where keys are names of metrics and values are metrics.
+            Side effect: making graph and printing metrics.
         """
 
         data_for_graph = self.eda_graph(without_lik=without_lik,
                                         only_with_lick=only_with_lick,
                                         time=time,
-                                        verbose=verbose,
                                         replacing_value=replacing_value,
                                         without_dem_base=without_dem_base,
                                         input_time_interval=input_time_interval,
-                                        corners=corners,
                                         time_start=time_start,
                                         time_finish=time_finish,
+                                        time_start_median=time_start_median,
+                                        time_finish_median=time_finish_median,
                                         delete_zero_in_intervals_for_median=delete_zero_in_intervals_for_median,
-                                        median_all_time=median_all_time,
+                                        median_special_time=median_special_time,
                                         dynamic=dynamic,
-                                        intellicage=intellicage)
+                                        intellicage=intellicage,
+                                        parser_condition=parser_condition)
 
         stage_names = self.dict_names.keys()
-        data_for_graph = list(zip(stage_names, data_for_graph))
-        for stage_name, cortege in data_for_graph:
+        data_for_graph_zipped = list(zip(stage_names, data_for_graph))
+
+        for stage_name, cortege in data_for_graph_zipped:
             for name_file, graph_dict in cortege[1].items():
-                adges_list = []
+
+                self.log['graph_analysis']['Time start'].append(time_start)
+                self.log['graph_analysis']['Time finish'].append(time_finish)
+                self.log['graph_analysis']['Stage name'].append(stage_name)
+                self.log['graph_analysis']['Name file'].append(name_file)
+
+                median = self.log['medians'][f'{name_file} ({stage_name})']
+                self.log['graph_analysis']['Median for graph analysis'].append(median)
+                self.log['graph_analysis']['Input replacing value'].append(input_time_interval)
+
+                edges_list = []
                 node_credibilities = {}
                 node_susceptibilities = {}
+
                 if graph_dict is not None:
+
+                    self.log['graph_analysis']['Data available'].append(True)
+                    self.log['graph_analysis']['Unique tags (sample)'].append(list(graph_dict))
+
+                    sup_dem_list = []
                     for key_tag, v in graph_dict.items():
                         for index_tag, relations in list(zip(v.index, v.values)):
                             if relations[0] != 0:
                                 for tag in [index_tag] * relations[0]:
-                                    adges_list.append((key_tag, tag))
+                                    edges_list.append((key_tag, tag))
                             if index_tag in node_susceptibilities:
                                 node_susceptibilities[index_tag] += relations[0]
                             else:
                                 node_susceptibilities[index_tag] = relations[0]
+
                         node_credibilities[key_tag] = v.values.sum()
+
+                        if key_tag in self.log['demonstrators'][name_file]:
+                            sup_dem_list.append((key_tag, node_credibilities[key_tag]))
+
+                    self.log['graph_analysis']['Edges from dem'].append(sup_dem_list)
 
                     for tag in node_susceptibilities.keys():
                         node_susceptibilities[
@@ -1771,36 +1798,94 @@ class RatExperiment:
                             tag] = f'count = {node_credibilities[tag]}, coef = {round(node_credibilities[tag] / division_coef, 3)}'
 
                     g = nx.Graph()
-                    g.add_edges_from(adges_list)
+                    g.add_edges_from(edges_list)
 
-                    print(f'\n======= Graph metrics of {name_file} ({stage_name}) =======')
+                    self.to_log(
+                        f'\n======= Graph metrics of {name_file} ({stage_name}) ({time_start} - {time_finish}) =======')
                     try:
-                        print("Eccentricity: ", [(x, y) for x, y in nx.eccentricity(g).items()])
+                        eccentricity = [(x, y) for x, y in nx.eccentricity(g).items()]
+                        self.to_log(f'Eccentricity: {eccentricity}')
+                        self.log['graph_analysis']['Eccentricity'].append(eccentricity)
                     except:
-                        print('There is no values to evaluate eccentricity')
+                        self.to_log('There is no values to evaluate eccentricity.')
+                        self.log['graph_analysis']['Eccentricity'].append(None)
                     try:
-                        print("Diameter: ", nx.diameter(g))
+                        diameter = nx.diameter(g)
+                        self.to_log(f'Diameter: {diameter}')
+                        self.log['graph_analysis']['Diameter'].append(diameter)
                     except:
-                        print('There is no values to evaluate diameter')
+                        self.to_log('There is no values to evaluate diameter.')
+                        self.log['graph_analysis']['Diameter'].append(None)
                     try:
-                        print("Radius: ", nx.radius(g))
+                        radius = nx.radius(g)
+                        self.to_log(f'Radius: {radius}')
+                        self.log['graph_analysis']['Radius'].append(radius)
                     except:
-                        print('There is no values to evaluate radius')
+                        self.to_log('There is no values to evaluate radius.')
+                        self.log['graph_analysis']['Radius'].append(None)
                     try:
-                        print("Periphery: ", list(nx.periphery(g)))
+                        periphery = list(nx.periphery(g))
+                        self.to_log(f'Periphery: {periphery}')
+                        self.log['graph_analysis']['Periphery'].append(periphery)
                     except:
-                        print('There is no values to evaluate periphery')
+                        self.to_log('There is no values to evaluate periphery.')
+                        self.log['graph_analysis']['Periphery'].append(None)
                     try:
-                        print("Center: ", list(nx.center(g)))
+                        center = list(nx.center(g))
+                        self.to_log(f'Center: {center}')
+                        self.log['graph_analysis']['Center'].append(center)
                     except:
-                        print('There is no values to evaluate center')
+                        self.to_log('There is no values to evaluate center.')
+                        self.log['graph_analysis']['Center'].append(None)
+                    try:
+                        number_of_edges = len(nx.edges(g))
+                        self.to_log(f'Number of edges: {number_of_edges}')
+                        self.log['graph_analysis']['Number of edges'].append(number_of_edges)
+                    except:
+                        self.to_log('There are no edges.')
+                        self.log['graph_analysis']['Number of edges'].append(None)
 
-                    print('Node credibility: ', node_credibilities)
-                    print('Node susceptibilities: ', node_susceptibilities)
-                    print('Graph weight: ', graph_weight)
-                    print('Median for graph analysis: ', self.dict_with_medians[f'{name_file} ({stage_name})'])
+                    self.to_log(f'Node credibility: f{node_credibilities}')
+                    self.log['graph_analysis']['Node credibility'].append(node_credibilities)
+                    self.to_log(f'Node susceptibilities: {node_susceptibilities}')
+                    self.log['graph_analysis']['Node susceptibilities'].append(node_susceptibilities)
+                    self.to_log(f'Graph weight: {graph_weight}')
+                    self.log['graph_analysis']['Graph weight'].append(graph_weight)
+
+                    self.to_log(f'Median for graph analysis: {median}')
+                    self.to_log(f'Input replacing value: {input_time_interval}')
+
+                    number_of_nodes = len(list(graph_dict))
+                    self.to_log(f'Number of nodes: {number_of_nodes}')
+                    self.log['graph_analysis']['Number of nodes'].append(number_of_nodes)
+
+                    number_of_connected_nodes_list = []
+                    for tag_from, tag_to in edges_list:
+                        if tag_from not in number_of_connected_nodes_list:
+                            number_of_connected_nodes_list.append(tag_from)
+                        if tag_to not in number_of_connected_nodes_list:
+                            number_of_connected_nodes_list.append(tag_to)
+
+                    if len(number_of_connected_nodes_list) == 0:
+                        number_of_connected_nodes = 0
+                    else:
+                        number_of_connected_nodes = len(number_of_connected_nodes_list)
+
+                    self.to_log(f'Number of connected nodes: {number_of_connected_nodes}')
+                    self.log['graph_analysis']['Number of connected nodes'].append(number_of_connected_nodes)
+
                 else:
-                    print(f'\nIn {stage_name} {name_file} there is no information')
+                    self.to_log(f'\nIn {stage_name} {name_file} there is no information')
+
+                    none_list = ['Eccentricity', 'Diameter', 'Radius', 'Periphery', 'Center', 'Node credibility',
+                                 'Node susceptibilities', 'Graph weight', 'Number of nodes',
+                                 'Number of connected nodes',
+                                 'Number of edges', 'Unique tags (sample)', 'Edges from dem']
+                    for key in none_list:
+                        self.log['graph_analysis'][key].append(None)
+                    self.log['graph_analysis']['Data available'].append(False)
+
+        return data_for_graph, self.log['graph_analysis']
 
     @staticmethod
     def label_densityhist(ax,
@@ -1856,11 +1941,12 @@ class RatExperiment:
                   without_dem: bool = False,
                   time_start: str = None,
                   time_finish: str = None,
-                  intellicage: dict = None,
+                  intellicage=None,
                   density: bool = True,
                   bins: int = 12,
                   size: tuple = (5, 5),
-                  condition: dict = None):
+                  condition: dict = None,
+                  parser_condition: dict = None):
         """
         ------------
         Function:
@@ -1928,8 +2014,9 @@ class RatExperiment:
             bases_dem_tags = {}
 
             # =========================================================== customizable
-            if stage in list(condition.keys()):
-                without_dem = condition[stage]
+            if condition is not None:
+                if stage in list(condition.keys()):
+                    without_dem = condition[stage]
             else:
                 without_dem = input_without_dem
             # ===========================================================
@@ -1939,17 +2026,18 @@ class RatExperiment:
                 bases[name_base], \
                 bases_tags[name_base], \
                 bases_dem_tags[name_base] = self.parser(name_base=name_base,
+                                                        name_stage=stage,
                                                         name_group=name_group,
                                                         name_animal=self.name_animal_file,
                                                         input_path=self.input_path,
                                                         without_lik=without_lik,
                                                         only_with_lick=only_with_lick,
                                                         time=time,
-                                                        verbose=verbose,
                                                         without_dem=without_dem,
                                                         time_start=time_start,
                                                         time_finish=time_finish,
-                                                        intellicage=intellicage)
+                                                        intellicage=intellicage,
+                                                        condition=parser_condition)
 
             base = pd.concat([*bases.values()], ignore_index=True)
             base = base.groupby(['Tag']).count()
@@ -1967,28 +2055,28 @@ class RatExperiment:
 
             return_dict[stage] = base
 
+            self.to_log(f'\n======= Rat tags in groups =======')
+            for k, v in bases_tags.items():
+                self.to_log(f'{k, v}')
+            self.to_log(f'\n======= {stage} =======')
+
+            for k, v in bases.items():
+                v.index = v['VisitID']
+                v = v.groupby(['Tag']).count()
+                v['The number of visits of each rat'] = v['VisitID']
+
+                self.to_log(f'\n{k}\n{v["The number of visits of each rat"]}')
+
+            self.to_log(f'\n======= Information on the whole {stage} =======')
+            self.to_log(base)
+
             if verbose:
-                print(f'\n======= Rat tags in groups =======')
-                for k, v in bases_tags.items():
-                    print(k, v)
-
-                print(f'\n======= {stage} =======')
-                for k, v in bases.items():
-                    v.index = v['VisitID']
-                    v = v.groupby(['Tag']).count()
-                    v['The number of visits of each rat'] = v['VisitID']
-
-                    print('\n', k, '\n', v['The number of visits of each rat'])
-
-                print(f'\n======= Information on the whole {stage} =======')
-                print(base)
-
                 fig, ax = plt.subplots(figsize=size)
                 n, bins, _ = ax.hist(base, bins=bins, log=False, density=density)
                 self.label_densityhist(ax, n, bins, x=4, y=0.01, r=2)
                 ax.set_title(stage)
                 ax.axes.yaxis.set_ticks([])
-                print(f'\nBin boundaries: {[int(x) for x in list(bins)]}')
+                self.to_log(f'\nBin boundaries: {[int(x) for x in list(bins)]}')
 
         return return_dict
 
@@ -2002,8 +2090,9 @@ class RatExperiment:
                       time: float = None,
                       time_start: str = None,
                       time_finish: str = None,
-                      intellicage: dict = None,
+                      intellicage=None,
                       condition: dict = None,
+                      parser_condition: dict = None,
                       density: bool = True,
                       bins: int = 12,
                       size: tuple = (5, 5),
@@ -2076,13 +2165,20 @@ class RatExperiment:
                 Example: (50,100)
         ------------
         Return:
+            Dictionary where keys are stage names, and values are pandas.Series with visit intervals for each tag.
         """
 
         if replacing_value == 'auto':
             if time is None:
                 if time_start is not None and time_finish is not None:
-                    time_start_for_replacing_value = pd.to_datetime(time_start, format='%H:%M:%S')
-                    time_finish_for_replacing_value = pd.to_datetime(time_finish, format='%H:%M:%S')
+
+                    if len(time_start) > 8 or len(time_finish) > 8:
+                        time_start_for_replacing_value = pd.to_datetime(time_start, format='%Y-%m-%d_%H:%M:%S')
+                        time_finish_for_replacing_value = pd.to_datetime(time_finish, format='%Y-%m-%d_%H:%M:%S')
+                    else:
+                        time_start_for_replacing_value = pd.to_datetime(time_start, format='%H:%M:%S')
+                        time_finish_for_replacing_value = pd.to_datetime(time_finish, format='%H:%M:%S')
+
                     replacing_value = (time_finish_for_replacing_value - time_start_for_replacing_value).seconds
                 else:
                     replacing_value = 24 * 60 * 60  # whole day
@@ -2109,17 +2205,18 @@ class RatExperiment:
                 bases[name_base], \
                 bases_tags[name_base], \
                 bases_dem_tags[name_base] = self.parser(name_base=name_base,
+                                                        name_stage=stage,
                                                         name_group=name_group,
                                                         name_animal=self.name_animal_file,
                                                         input_path=self.input_path,
                                                         without_lik=without_lik,
                                                         only_with_lick=only_with_lick,
                                                         time=time,
-                                                        verbose=verbose,
                                                         without_dem=without_dem,
                                                         time_start=time_start,
                                                         time_finish=time_finish,
-                                                        intellicage=intellicage)
+                                                        intellicage=intellicage,
+                                                        condition=parser_condition)
             all_dems = []
             for i in bases_dem_tags.values():
                 if len(i) > 0 and i not in all_dems:
@@ -2145,7 +2242,7 @@ class RatExperiment:
                     base_.loc[tag, f'{stage}_intervals'] = np.median(diff)
 
                 if verbose_detailed:
-                    print(f'{tag} : {diff}')
+                    self.to_log(f'{tag} : {diff}')
 
                     if len(diff) > 0:
                         fig, ax = plt.subplots()
@@ -2170,14 +2267,14 @@ class RatExperiment:
 
             return_dict[stage] = base
 
+            self.to_log(f'\n======= Rat tags in groups =======')
+            for k, v in bases_tags.items():
+                self.to_log(f'{k, v}')
+
+            self.to_log(f'\n======= Information on the whole {stage} =======')
+            self.to_log(base)
+
             if verbose:
-                print(f'\n======= Rat tags in groups =======')
-                for k, v in bases_tags.items():
-                    print(k, v)
-
-                print(f'\n======= Information on the whole {stage} =======')
-                print(base)
-
                 fig, ax = plt.subplots(figsize=size)
                 n, bins, _ = ax.hist(base,
                                      bins=bins,
@@ -2187,6 +2284,165 @@ class RatExperiment:
                 self.label_densityhist(ax, n, bins, x=4, y=0.01, r=2)
                 ax.set_title(stage)
                 ax.axes.yaxis.set_ticks([])
-                print(f'\nBin boundaries: {[int(x) for x in list(bins)]}')
+                self.to_log(f'\nBin boundaries: {[int(x) for x in list(bins)]}')
 
         return return_dict
+
+    def permutation(self,
+                    x,
+                    y,
+                    iterations: int = 100000,
+                    bins: int = 30,
+                    figsize: tuple = (5, 5),
+                    title: str = None):
+        """
+
+        """
+        self.to_log(f'\n{title}')
+
+        sample_stat = np.median(x) - np.median(y)
+        stats = np.zeros(iterations)
+        for k in range(iterations):
+            new_x = random.choices(list(x) + list(y), k=len(x))
+            new_y = random.choices(list(x) + list(y), k=len(y))
+            stats[k] = np.median(new_x) - np.median(new_y)
+        p_value = np.mean(stats > sample_stat)
+
+        rec = f"{title}: p-value={p_value:.6f}"
+        print(rec)
+        self.to_log(rec)
+
+        plt.rcParams["figure.figsize"] = figsize
+        plt.hist(stats, label='Permutation Statistics', bins=bins)
+        plt.axvline(x=sample_stat, c='r', ls='--', label='Sample Statistic')
+        plt.legend()
+        plt.xlabel('Median differences')
+        plt.title(title)
+
+    def wilcoxon(self,
+                 x,
+                 y,
+                 regime_zero: bool = False,
+                 title: str = None):
+        """
+
+        """
+        self.to_log(f'\n{title}')
+
+        if not regime_zero:
+            for i in y.index:
+                if i not in x.index:
+                    if verbose:
+                        self.to_log(f'There is no tag {i} in the first selection. Deleting this tag.')
+                    y = y.loc[y.index != i]
+
+            for i in x.index:
+                if i not in y.index:
+                    if verbose:
+                        self.to_log(f'There is no tag {i} in the second selection. Deleting this tag.')
+                    x = x.loc[x.index != i]
+        else:
+            for i in y.index:
+                if i not in x.index:
+                    if verbose:
+                        self.to_log(
+                            f'There is no tag {i} in the first selection. Adding the tag to the first selection with a null value.')
+                    x.loc[i] = 0
+
+            for i in x.index:
+                if i not in y.index:
+                    if verbose:
+                        self.to_log(f'There is no tag {i} in the second selectio. Adding the tag to the second selection with a null value.')
+                    y.loc[i] = 0
+
+        x.sort_index(inplace=True)
+        y.sort_index(inplace=True)
+
+        for method in ['wilcox', 'pratt', 'zsplit']:
+            for alt in ['greater', 'less', 'two-sided']:
+                rec1 = f'\nMethod - {method}, alternative - {alt}.'
+                rec2 = stats.wilcoxon(x, y, alternative=alt, zero_method=method)
+                print(rec1)
+                print(rec2)
+                self.to_log(rec1)
+                self.to_log(rec2)
+
+    def timeline(self,
+                 metric: str,
+                 start: str,
+                 finish: str,
+                 slide: float,
+                 step: float,
+                 time_start_median: str = None,
+                 time_finish_median: str = None,
+                 without_lik: bool = False,
+                 only_with_lick: bool = False,
+                 time: float = None,
+                 replacing_value='auto',
+                 without_dem_base: bool = False,
+                 input_time_interval='auto',
+                 delete_zero_in_intervals_for_median: bool = True,
+                 median_special_time: bool = True,
+                 dynamic: bool = True,
+                 intellicage=None,
+                 parser_condition: dict = None,
+                 stat: bool = True,
+                 division_coef: float = None,
+                 plotly_verbose: bool = True):
+        """
+        metric:
+            gcc (giant cluster component)
+            dem_power (number of the edges from a dem)
+        """
+        _ = self.dynamic_graphs(start=start,
+                                finish=finish,
+                                time_start_median=time_start_median,
+                                time_finish_median=time_finish_median,
+                                slide=slide,
+                                step=step,
+                                without_lik=without_lik,
+                                only_with_lick=only_with_lick,
+                                time=time,
+                                replacing_value=replacing_value,
+                                without_dem_base=without_dem_base,
+                                input_time_interval=input_time_interval,
+                                delete_zero_in_intervals_for_median=delete_zero_in_intervals_for_median,
+                                median_special_time=median_special_time,
+                                dynamic=dynamic,
+                                intellicage=intellicage,
+                                parser_condition=parser_condition,
+                                stat=stat,
+                                division_coef=division_coef)
+
+        data = pd.DataFrame(self.log['graph_analysis'])
+
+        for stage, file_names in self.dict_names.items():
+            for file_name in file_names:
+
+                data_for_plot = data.loc[(data['Stage name'] == stage) & (data['Name file'] == file_name)]
+
+                fig = go.Figure(layout=go.Layout(
+                    title=go.layout.Title(text=f'Metric: {metric}. Stage: {stage}. File: {file_name}')))
+                if metric == 'gcc':
+                    fig.add_trace(go.Scatter(x=data_for_plot['Time finish'],
+                                             y=100 * data_for_plot['Number of connected nodes'] /
+                                               len(self.log['unique tags (file)'][file_name]),
+                                             name='Number of connected nodes'))
+                elif metric == 'dem_power':
+                    for dem in self.log['demonstrators'][file_name]:
+                        sup_plot_array = []
+                        for list_ in list(data['Edges from dem']):
+                            if list_ is not None:
+                                for cortege in list_:
+                                    if cortege[0] == dem:
+                                        sup_plot_array.append(cortege[1])
+                            else:
+                                sup_plot_array.append(0)
+
+                        fig.add_trace(go.Scatter(x=data_for_plot['Time finish'],
+                                                 y=np.array(sup_plot_array) /
+                                                   len(self.log['unique tags (file)'][file_name]),
+                                                 name=f'Number of edges from {dem}'))
+                if plotly_verbose:
+                    fig.show()
+                fig.write_html(f"{self.output_path}\\{metric}-{stage}-{file_name}.html")
