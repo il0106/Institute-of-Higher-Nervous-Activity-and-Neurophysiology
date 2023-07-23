@@ -2287,6 +2287,7 @@ class RBCA:
                 self.to_log(f'\nBin boundaries: {[int(x) for x in list(bins)]}')
 
         return return_dict
+<<<<<<< HEAD
 
     def permutation(self,
                     x,
@@ -2446,3 +2447,5 @@ class RBCA:
                 if plotly_verbose:
                     fig.show()
                 fig.write_html(f"{self.output_path}\\{metric}-{stage}-{file_name}.html")
+=======
+>>>>>>> 98c551960acf16a93ac049fbe0fc68f950ce8a02
