@@ -32,6 +32,10 @@ from collections import defaultdict
 from copy import deepcopy
 from datetime import datetime
 from functools import reduce
+import plotly.express as px
+from plotly.offline import iplot
+from scipy.stats import permutation_test
+from math import factorial
 
 
 class RBCA:
@@ -70,6 +74,8 @@ class RBCA:
             show_warnings: bool
                 Show warnings (pandas, plotly etc.) or not. Default value is False.
                 Example: True or False
+
+            corners: [1,2] list with original corner labels
         ------------
         Return:
             Class instance of the experiment. 
@@ -81,21 +87,67 @@ class RBCA:
         self.input_path = input_path
         self.output_path = output_path
         self.name_animal_file = name_animal_file
+        self.animal_file = None
         self.dict_names = dict_names
         self.corners = corners
         self.log = {'medians': {},
                     'graph_analysis': defaultdict(list),
-                    'unique tags (file)': {},
+                    'unique tags (slice)': {},
                     'demonstrators': {}}
 
         if not show_warnings:
             warnings.filterwarnings("ignore")
 
+        if input_path is not None:
+            if input_path.endswith('.zip'):
+                with zipfile.ZipFile(input_path) as z:
+                    self.animal_file = self.file_opener(base=[text_file.filename for text_file in z.infolist()],
+                                                        file_name=self.name_animal_file,
+                                                        zip_=True)
+            else:
+                self.animal_file = self.file_opener(base=(next(os.walk(self.input_path), (None, None, []))[2]),
+                                                    file_name=self.name_animal_file,
+                                                    zip_=False)
+            self.animal_file['Demonstrator'] = self.animal_file['Demonstrator'].fillna(0).astype(int)
+            self.animal_file = self.animal_file.astype(str)
+
     def to_log(self,
-               record: str):
-        file_name = f'{self.output_path}\\log.txt'
-        with open(file_name, 'a', newline='', encoding='utf-8') as f:
-            f.write(f'{datetime.now()}_________________________ {record}\n')
+               record):
+        if self.output_path is not None:
+            file_name = f'{self.output_path}\\log.txt'
+            with open(file_name, 'a', newline='', encoding='utf-8') as f:
+                f.write(f'{datetime.now()}_________________________ {record}\n')
+
+    def file_opener(self,
+                    base,
+                    file_name,
+                    zip_: bool = False):
+
+        raw_file = None
+        for inner_file_name in base:
+            if inner_file_name[:len(file_name)] == file_name:
+                if inner_file_name[-4:] == 'html':
+                    if zip_:
+                        raw_file = pd.read_html(z.open(f'{file_name}.html'), header=1)[0]
+                    else:
+                        raw_file = pd.read_html(f'{self.input_path}\\{file_name}.html', header=1)[0]
+                elif inner_file_name[-3:] == 'csv':
+                    if zip_:
+                        raw_file = pd.read_csv(z.open(f'{file_name}.csv'))
+                    else:
+                        raw_file = pd.read_csv(f'{self.input_path}\\{file_name}.csv')
+                elif inner_file_name[-4:] == 'xlsx':
+                    if zip_:
+                        raw_file = pd.read_excel(z.open(f'{file_name}.xlsx'))
+                    else:
+                        raw_file = pd.read_excel(f'{self.input_path}\\{file_name}.xlsx')
+                else:
+                    self.to_log(
+                        f'\nThere is the {file_name}, but it is not the right format (html/csv/xlsx) in the directory {self.input_path}')
+        if raw_file is None:
+            self.to_log(f'\nThere is no the {file_name} in the directory {self.input_path}')
+
+        return raw_file
 
     def date_transformer(self,
                          df,
@@ -170,7 +222,6 @@ class RBCA:
             return None
 
     def intellicage_parser(self,
-                           input_path: str,
                            name_base: str,
                            illumination='all_time'):
         """
@@ -213,7 +264,7 @@ class RBCA:
             And PyMICE tools: https://github.com/Neuroinflab/PyMICE
         """
 
-        ml = pm.Loader(f'{input_path}\\{name_base}.zip',
+        ml = pm.Loader(f'{self.input_path}\\{name_base}.zip',
                        getNp=True,
                        getLog=True,
                        getEnv=True,
@@ -279,6 +330,7 @@ class RBCA:
 
         visits = pd.DataFrame(sup_dict)
 
+        output_visits = None
         if illumination != 'all_time':
             raw_env = ml.getEnvironment(order='DateTime')
             sup_dict = {'DateTime': [],
@@ -315,7 +367,7 @@ class RBCA:
                     sup_dict[f'{start}-{end}'] = visits.loc[
                         (visits['_StartTime'] <= end) & (visits['_StartTime'] >= start)]
                     sup_visits = pd.concat([*sup_dict.values()], ignore_index=True)
-                    sup_visits.drop_duplicates(subset=['VisitID'], keep=False, inplace=True)
+                    sup_visits.drop_duplicates(subset=['VisitID'], keep='first', inplace=True)
 
                     if illumination:
                         visits.index = visits['VisitID']
@@ -330,13 +382,13 @@ class RBCA:
                 for start in start_i:
                     sup_dict1[f'{start}'] = visits.loc[visits['_StartTime'] >= start]
                 sup_visits = pd.concat([*sup_dict1.values()], ignore_index=True)
-                sup_visits.drop_duplicates(subset=['VisitID'], keep=False, inplace=True)
+                sup_visits.drop_duplicates(subset=['VisitID'], keep='first', inplace=True)
 
                 sup_dict2 = {}
                 for end in end_i:
                     sup_dict2[f'{end}'] = sup_visits.loc[sup_visits['_StartTime'] <= end]
                 sup_visits_ = pd.concat([*sup_dict2.values()], ignore_index=True)
-                sup_visits_.drop_duplicates(subset=['VisitID'], keep=False, inplace=True)
+                sup_visits_.drop_duplicates(subset=['VisitID'], keep='first', inplace=True)
 
                 if illumination:
                     visits.index = visits['VisitID']
@@ -355,10 +407,7 @@ class RBCA:
                name_base: str,
                name_stage: str,
                name_group: str,
-               name_animal: str,
-               input_path: str,
-               without_lik: bool = False,
-               only_with_lick: bool = False,
+               lick: bool = None,
                time: float = None,
                without_dem: bool = False,
                time_start: str = None,
@@ -434,36 +483,19 @@ class RBCA:
             list with demonstrator's tag (example: [12345678])
         """
 
-        if input_path.endswith('.zip'):
-            with zipfile.ZipFile(input_path) as z:
-                for inner_file_name in [text_file.filename for text_file in z.infolist()]:
-                    if inner_file_name[:len(name_base)] == name_base:
-                        if inner_file_name[-4:] == 'html':
-                            base = pd.read_html(z.open(f'{name_base}.html'), header=1)[0]
-                        else:
-                            self.to_log(f'\nThere is no file {name_base}.html in directory {input_path}')
-                    elif inner_file_name[:len(name_animal)] == name_animal:
-                        if inner_file_name[-4:] == 'html':
-                            raw_animal = pd.read_html(z.open(f'{name_animal}.html'), header=1)[0]
-                        else:
-                            self.to_log(f'\nThere is no file {name_animal}.html in directory {input_path}')
+        if self.input_path.endswith('.zip'):
+            with zipfile.ZipFile(self.input_path) as z:
+                base = self.file_opener(base=[text_file.filename for text_file in z.infolist()],
+                                        file_name=name_base,
+                                        zip_=True)
         else:
-            for inner_file_name in (next(os.walk(input_path), (None, None, []))[2]):
-                if inner_file_name[:len(name_base)] == name_base:
-                    if intellicage is not None:
-                        base = self.intellicage_parser(input_path=input_path,
-                                                       name_base=name_base,
-                                                       illumination=intellicage)
-                    elif inner_file_name[-4:] == 'html':
-                        base = pd.read_html(f'{input_path}\\{name_base}.html', header=1)[0]
-                    else:
-                        self.to_log(f'\nThere is no file {name_base} in directory {input_path}')
-
-                elif inner_file_name[:len(name_animal)] == name_animal:
-                    if inner_file_name[-4:] == 'html':
-                        raw_animal = pd.read_html(f'{input_path}\\{name_animal}.html', header=1)[0]
-                    else:
-                        self.to_log(f'\nThere is no file {name_animal}.html in directory {input_path}')
+            if intellicage is not None:
+                base = self.intellicage_parser(name_base=name_base,
+                                               illumination=intellicage)
+            else:
+                base = self.file_opener(base=(next(os.walk(self.input_path), (None, None, []))[2]),
+                                        file_name=name_base,
+                                        zip_=False)
 
         if intellicage is None:
             base['_StartDate'] = self.date_transformer(base, 'StartDate')
@@ -493,29 +525,43 @@ class RBCA:
                                 base = base[base['StartDate'] == second_day]
                             elif condition[stage][file_name][:4] == 'time':
                                 condition_sup_list = condition[stage][file_name].split('|')
-                                condition_start = condition_sup_list[1]
-                                condition_finish = condition_sup_list[2]
 
-                                if len(condition_start) > 8 or len(condition_finish) > 8:
-                                    start = pd.to_datetime(condition_start, format='%Y-%m-%d_%H:%M:%S')
-                                    finish = pd.to_datetime(condition_finish, format='%Y-%m-%d_%H:%M:%S')
-                                    base = base.loc[(base['_StartTime'] <= finish) & (base['_StartTime'] >= start)]
+                                if len(condition_sup_list[1:]) % 2 == 0:
+                                    sup_starts = sorted(condition_sup_list[1::2])
+                                    sup_finishes = sorted(condition_sup_list[2::2])
+
+                                    sup_dict = {}
+                                    for start, finish in list(zip(sup_starts, sup_finishes)):
+
+                                        if len(start) > 8 and len(finish) > 8:
+                                            begin = pd.to_datetime(start, format='%Y-%m-%d_%H:%M:%S')
+                                            end = pd.to_datetime(finish, format='%Y-%m-%d_%H:%M:%S')
+                                            sup_dict[f'{start}-{finish}'] = base.loc[
+                                                (base['_StartTime'] <= end) & (base['_StartTime'] >= begin)]
+                                        else:
+                                            self.to_log(
+                                                f'\nError when entering time in the condition in {name_base} of {name_stage}.')
+
+                                    base = pd.concat([*sup_dict.values()], ignore_index=True)
+                                    base.drop_duplicates(subset=['VisitID'], keep='first', inplace=True)
                                 else:
                                     self.to_log(
-                                        f'Error when entering time in the condition in {name_base} of {name_stage}.')
+                                        f'''\nError when entering time in the condition in {name_base} of {name_stage}.
+                                            \rIt have to be time pairs.''')
 
             if 'date' in condition.keys():
                 spec_date = condition['date']
                 base = base[base['StartDate'] == spec_date]
         # ===========================================================
 
-        dems = list(set(list(raw_animal.loc[(raw_animal['Protocol'] == 'new') & (raw_animal['Demostrator'] == 1) & (
-                raw_animal['Group'] == name_group), 'Animal ID'])))
+        dems = list(set(list(self.animal_file.loc[(self.animal_file['Demonstrator'] == '1') &
+                                                  (self.animal_file['Group'] == name_group),
+                                                  'Animal ID'])))
+
+        base['Tag'] = base['Tag'].astype(str)
 
         dem_in_base = []
         base_list = list(base['Tag'].unique())
-
-        unique_tag_list = deepcopy(base_list)
 
         for i in dems:
             if i in base_list:
@@ -533,7 +579,7 @@ class RBCA:
         else:
             base_out_dem = base
 
-        self.log['unique tags (file)'][name_base] = unique_tag_list
+        self.log['unique tags (slice)'][name_base] = list(base_out_dem['Tag'].unique())
 
         if time is not None and (time_start is None and time_finish is None):
             start = pd.Timestamp(sorted(list(base['_StartTime']))[0])
@@ -586,9 +632,9 @@ class RBCA:
             finish = pd.Timestamp(sorted(list(base['_StartTime']))[-1])
             self.to_log(f'\nStart time of downloading {name_base} = {start}, the end of download = {finish}.')
 
-        if without_lik:
+        if lick is False:
             base_out_dem = base_out_dem[base_out_dem['LickNumber'] == 0]
-        if only_with_lick:
+        if lick:
             base_out_dem = base_out_dem[base_out_dem['LickNumber'] != 0]
 
         base_out_dem.sort_values('_StartTime', inplace=True)
@@ -600,7 +646,7 @@ class RBCA:
                        data_,
                        tags: list,
                        time_interval: float,
-                       name_of_group: str):
+                       special_name: str):
         """
         ------------
         Function:
@@ -639,7 +685,7 @@ class RBCA:
             _tags = tags.copy()
             _tags.remove(tag)
 
-            name_column = f'Visits in {name_of_group}'
+            name_column = f'Visits in {special_name}'
 
             df_for_tag = pd.DataFrame(data=0, columns=[name_column], index=_tags)
 
@@ -721,7 +767,7 @@ class RBCA:
                                  net,
                                  corners: list = None,
                                  dynamic: bool = False,
-                                 name_of_group: str = '_'):
+                                 special_name: str = '_'):
         """
         ------------
         Function:
@@ -769,7 +815,7 @@ class RBCA:
             all cases.
         """
 
-        name_column = f'Visits in {name_of_group}'
+        name_column = f'Visits in {special_name}'
 
         corners_dict = dict.fromkeys(corners)
         for corner in corners:
@@ -778,7 +824,7 @@ class RBCA:
                                                        data_of_corner.copy(),
                                                        tags,
                                                        time_interval,
-                                                       name_of_group)
+                                                       special_name)
 
         if len(corners) >= 2:
             final_dict = reduce(self.combiner, list(corners_dict.values()))
@@ -814,7 +860,7 @@ class RBCA:
               net,
               time_interval: float = None,
               dynamic: bool = False,
-              name_of_group: str = '_'):
+              special_name: str = '_'):
         """
         ------------
         Function:
@@ -855,7 +901,7 @@ class RBCA:
         for corner in self.corners:
             if corner not in list(input_data['Corner'].unique()):
                 self.to_log(f'''\nThere is no data on the {corner} corner in the next slice:
-                                \rName of the group: {name_of_group}
+                                \rName of the group: {special_name}
                                 \rData: {input_data.head()}
                                 \rTags: {tags}
                                 \nThe analysis will be performed without this corner.''')
@@ -870,7 +916,7 @@ class RBCA:
                                                        net=net,
                                                        corners=corners_list,
                                                        dynamic=dynamic,
-                                                       name_of_group=name_of_group)
+                                                       special_name=special_name)
         else:
             graph_dict = None
 
@@ -879,8 +925,7 @@ class RBCA:
     def work(self,
              title_of_stage: str,
              names_of_files: list,
-             without_lik: bool = False,
-             only_with_lick: bool = False,
+             lick: bool = None,
              time: float = None,
              time_start: str = None,
              time_finish: str = None,
@@ -968,11 +1013,8 @@ class RBCA:
             bases_tags[name_base], \
             bases_dems[name_base] = self.parser(name_base=name_base,
                                                 name_stage=title_of_stage,
-                                                name_animal=self.name_animal_file,
-                                                input_path=self.input_path,
                                                 name_group=name_group,
-                                                without_lik=without_lik,
-                                                only_with_lick=only_with_lick,
+                                                lick=lick,
                                                 time=time,
                                                 without_dem=without_dem_base,
                                                 time_start=time_start,
@@ -993,11 +1035,8 @@ class RBCA:
                 bases_tags_all[name_base], \
                 bases_dems_all[name_base] = self.parser(name_base=name_base,
                                                         name_stage=title_of_stage,
-                                                        name_animal=self.name_animal_file,
-                                                        input_path=self.input_path,
                                                         name_group=name_group,
-                                                        without_lik=without_lik,  # attention
-                                                        only_with_lick=only_with_lick,  # attention
+                                                        lick=lick,
                                                         time=None,
                                                         without_dem=False,  # attention
                                                         time_start=time_start_median,
@@ -1109,7 +1148,7 @@ class RBCA:
                                         net,
                                         time_interval=time_interval,
                                         dynamic=dynamic,
-                                        name_of_group=title_of_stage + '_' + k)
+                                        special_name=title_of_stage + '_' + k)
             else:
                 graph_dict = self.graph(v,
                                         bases_tags[k],
@@ -1117,7 +1156,7 @@ class RBCA:
                                         net,
                                         time_interval=input_time_interval,
                                         dynamic=dynamic,
-                                        name_of_group=title_of_stage + '_' + k)
+                                        special_name=title_of_stage + '_' + k)
 
             list_with_dicts[k] = graph_dict
 
@@ -1135,8 +1174,7 @@ class RBCA:
         return base, list_with_dicts, all_dems
 
     def eda_graph(self,
-                  without_lik: bool = False,
-                  only_with_lick: bool = False,
+                  lick: bool = None,
                   time: float = None,
                   replacing_value='auto',
                   without_dem_base: bool = False,
@@ -1245,8 +1283,7 @@ class RBCA:
         for title, names_base in self.dict_names.items():
             output_list.append(self.work(title_of_stage=title,
                                          names_of_files=names_base,
-                                         without_lik=without_lik,
-                                         only_with_lick=only_with_lick,
+                                         lick=lick,
                                          time=time,
                                          without_dem_base=without_dem_base,
                                          dynamic=dynamic,
@@ -1268,7 +1305,7 @@ class RBCA:
     def graph_plotly(data: dict,
                      dem_tags: list,
                      coords='default',
-                     name_of_group: str = '_'):
+                     special_name: str = '_'):
         """
         ------------
         Function:
@@ -1299,7 +1336,7 @@ class RBCA:
             plotly.graph_objects.Scatter with the label 'No data on drinking bowls'.
         """
 
-        name_column = f'Visits in {name_of_group}'
+        name_column = f'Visits in {special_name}'
 
         if coords == 'default':
             coords = [(3, 5), (4, 1), (6, 1), (7, 5), (5, 8)]
@@ -1468,8 +1505,7 @@ class RBCA:
                        step: float,
                        time_start_median: str = None,
                        time_finish_median: str = None,
-                       without_lik: bool = False,
-                       only_with_lick: bool = False,
+                       lick: bool = None,
                        time: float = None,
                        replacing_value='auto',
                        without_dem_base: bool = False,
@@ -1580,8 +1616,7 @@ class RBCA:
                 str_new_start = str_new_start[-8:]
                 str_new_finish = str_new_finish[-8:]
 
-            sup_args = dict(without_lik=without_lik,
-                            only_with_lick=only_with_lick,
+            sup_args = dict(lick=lick,
                             time=time,
                             replacing_value=replacing_value,
                             without_dem_base=without_dem_base,
@@ -1626,7 +1661,7 @@ class RBCA:
                         names.append(sup_name)
                     sup_dict[sup_name] = self.graph_plotly(dict_relations,
                                                            cortege[2],
-                                                           name_of_group=sup_name)
+                                                           special_name=sup_name)
             final_time_dict[time] = sup_dict
 
         for name in names:
@@ -1641,8 +1676,7 @@ class RBCA:
 
     def graph_analysis(self,
                        division_coef: float = None,
-                       without_lik: bool = False,
-                       only_with_lick: bool = False,
+                       lick: bool = None,
                        time: float = None,
                        replacing_value='auto',
                        without_dem_base: bool = False,
@@ -1727,8 +1761,7 @@ class RBCA:
             Side effect: making graph and printing metrics.
         """
 
-        data_for_graph = self.eda_graph(without_lik=without_lik,
-                                        only_with_lick=only_with_lick,
+        data_for_graph = self.eda_graph(lick=lick,
                                         time=time,
                                         replacing_value=replacing_value,
                                         without_dem_base=without_dem_base,
@@ -1934,8 +1967,7 @@ class RBCA:
             ax.text(x_pos, y_pos, label)
 
     def eda_count(self,
-                  without_lik: bool = False,
-                  only_with_lick: bool = False,
+                  lick: bool = None,
                   time: float = None,
                   verbose: bool = False,
                   without_dem: bool = False,
@@ -2006,34 +2038,36 @@ class RBCA:
         """
 
         return_dict = {}
-        input_without_dem = copy.deepcopy(without_dem)
 
         for stage, file_names in self.dict_names.items():
             bases = {}
             bases_tags = {}
             bases_dem_tags = {}
+            tags_in_animal = {}
 
             # =========================================================== customizable
-            if condition is not None:
-                if stage in list(condition.keys()):
-                    without_dem = condition[stage]
+            if condition is not None and stage in list(condition.keys()):
+                final_without_dem = condition[stage]
             else:
-                without_dem = input_without_dem
+                final_without_dem = without_dem
             # ===========================================================
 
             for name_base in file_names:
                 name_group = name_base.split(' ')[0]
+
+                tags_in_animal[name_base] = \
+                    self.animal_file[self.animal_file['Group']==name_group]\
+                    [self.animal_file['Demonstrator']=='0']['Animal ID'].to_list() if final_without_dem else \
+                    self.animal_file[self.animal_file['Group'] == name_group]['Animal ID'].to_list()
+
                 bases[name_base], \
                 bases_tags[name_base], \
                 bases_dem_tags[name_base] = self.parser(name_base=name_base,
                                                         name_stage=stage,
                                                         name_group=name_group,
-                                                        name_animal=self.name_animal_file,
-                                                        input_path=self.input_path,
-                                                        without_lik=without_lik,
-                                                        only_with_lick=only_with_lick,
+                                                        lick=lick,
                                                         time=time,
-                                                        without_dem=without_dem,
+                                                        without_dem=final_without_dem,
                                                         time_start=time_start,
                                                         time_finish=time_finish,
                                                         intellicage=intellicage,
@@ -2042,15 +2076,10 @@ class RBCA:
             base = pd.concat([*bases.values()], ignore_index=True)
             base = base.groupby(['Tag']).count()
 
-            sup_bases = []
-            for i in bases_tags.values():
-                for j in i:
-                    if j is not None and j not in sup_bases:
-                        sup_bases.append(j)
-
-            for tag in sup_bases:
-                if tag not in base.index:
-                    base.loc[tag] = 0
+            for tags in tags_in_animal.values():
+                for tag in tags:
+                    if tag not in base.index and tag is not None:
+                        base.loc[tag] = 0
             base = base['VisitID']
 
             return_dict[stage] = base
@@ -2081,8 +2110,7 @@ class RBCA:
         return return_dict
 
     def eda_intervals(self,
-                      without_lik: bool = False,
-                      only_with_lick: bool = False,
+                      lick: bool = None,
                       replacing_value='auto',
                       verbose: bool = False,
                       verbose_detailed: bool = False,
@@ -2186,18 +2214,22 @@ class RBCA:
                 replacing_value = time * 60
 
         return_dict = {}
-        input_without_dem = copy.deepcopy(without_dem)
 
         for stage, file_names in self.dict_names.items():
+            _replacing_value = replacing_value
             bases = {}
             bases_tags = {}
             bases_dem_tags = {}
 
             # =========================================================== customizable
             if condition is not None and stage in list(condition.keys()):
-                without_dem = condition[stage]
+                final_without_dem = condition[stage]
             else:
-                without_dem = input_without_dem
+                final_without_dem = without_dem
+
+            if condition is not None and 'replacing_value' in list(condition.keys()):
+                if stage in list(condition['replacing_value']):
+                    _replacing_value = condition['replacing_value'][stage]
             # ===========================================================
 
             for name_base in file_names:
@@ -2207,12 +2239,9 @@ class RBCA:
                 bases_dem_tags[name_base] = self.parser(name_base=name_base,
                                                         name_stage=stage,
                                                         name_group=name_group,
-                                                        name_animal=self.name_animal_file,
-                                                        input_path=self.input_path,
-                                                        without_lik=without_lik,
-                                                        only_with_lick=only_with_lick,
+                                                        lick=lick,
                                                         time=time,
-                                                        without_dem=without_dem,
+                                                        without_dem=final_without_dem,
                                                         time_start=time_start,
                                                         time_finish=time_finish,
                                                         intellicage=intellicage,
@@ -2237,7 +2266,7 @@ class RBCA:
                 new_df['shift_EndTime'] = new_df['_EndTime'].shift()
                 diff = list((new_df['_StartTime'] - new_df['shift_EndTime']).dt.seconds)[1:]
                 if len(diff) == 0:
-                    base_.loc[tag, f'{stage}_intervals'] = replacing_value
+                    base_.loc[tag, f'{stage}_intervals'] = _replacing_value
                 else:
                     base_.loc[tag, f'{stage}_intervals'] = np.median(diff)
 
@@ -2259,9 +2288,9 @@ class RBCA:
 
             for tag in sup_bases:
                 if tag not in base.index:
-                    base.loc[tag] = replacing_value
-            if replacing_value is not None:
-                base = base.fillna(value=replacing_value)  # situation len(new_df) == 1 or == 0
+                    base.loc[tag] = _replacing_value
+            if _replacing_value is not None:
+                base = base.fillna(value=_replacing_value)  # situation len(new_df) == 1 or == 0
 
             base = base[f'{stage}_intervals']
 
@@ -2288,84 +2317,137 @@ class RBCA:
 
         return return_dict
 
+    @staticmethod
+    def series_changer(x: pd.Series,
+                       y: pd.Series,
+                       value_instead_of_none=None,
+                       funk_to_print=print,
+                       verbose: bool = True):
+        """
+        ДЕФОЛТНОЕ ПОВЕДЕНИЕ ДЕЛИТИНГ
+
+        value_instead_of_none:
+            Возможные значения: None, {'x':None,'y':2}
+        """
+        _x = x.copy()
+        _y = y.copy()
+
+        if value_instead_of_none is None:
+            for i in _y.index:
+                if i not in _x.index:
+                    if verbose:
+                        funk_to_print(f'There is no tag {i} in the first selection. Deleting this tag.')
+                    _y = _y.loc[_y.index != i]
+
+            for i in _x.index:
+                if i not in _y.index:
+                    if verbose:
+                        funk_to_print(f'There is no tag {i} in the second selection. Deleting this tag.')
+                    _x = _x.loc[_x.index != i]
+        else:
+            for i in _y.index:
+                if i not in _x.index:
+                    if verbose:
+                        funk_to_print(
+                            f'There is no tag {i} in the first selection. Adding the tag to the first selection with a {value_instead_of_none}.')
+                    _x.loc[i] = value_instead_of_none['x']
+
+            for i in _x.index:
+                if i not in _y.index:
+                    if verbose:
+                        funk_to_print(
+                            f'There is no tag {i} in the second selection. Adding the tag to the second selection with a {value_instead_of_none}.')
+                    _y.loc[i] = value_instead_of_none['y']
+
+        _x.sort_index(inplace=True)
+        _y.sort_index(inplace=True)
+
+        return _x, _y
+
     def permutation(self,
-                    x,
-                    y,
-                    iterations: int = 100000,
-                    bins: int = 30,
-                    figsize: tuple = (5, 5),
-                    title: str = None):
+                    x: pd.Series,
+                    y: pd.Series,
+                    statistic=np.nanmedian,
+                    permutation_type: str = 'independent',
+                    n_resamples: int = None,
+                    alternative: str = 'two-sided',
+                    title: str = None,
+                    verbose: bool = False,
+                    **kwargs):
         """
+        https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.permutation_test.html
 
+        def series_changer(x: pd.Series,
+                           y: pd.Series,
+                           value_instead_of_none: int = 0,
+                           func_to_print=print)
+
+        in this method:
+        _x, _y = self.series_changer(x,y,**kwargs)
+
+        NB: maximum two samples
         """
-        self.to_log(f'\n{title}')
+        _x, _y = x.copy(), y.copy()
+        if permutation_type == 'samples' or permutation_type == 'pairing':
+            _x, _y = self.series_changer(x,y,verbose=verbose,**kwargs)
+        if n_resamples is None:
+            if permutation_type == 'independent':
+                # https://en.wikipedia.org/wiki/Binomial_coefficient
+                n = len(x) + len(y)
+                k = len(x)
+                n_resamples = factorial(n)/(factorial(k)*factorial(n-k))
+            elif permutation_type == 'samples':
+                n_resamples = factorial(2)**len(_x)   # only two samples
+            else:
+                n_resamples = factorial(len(_x))
 
-        sample_stat = np.median(x) - np.median(y)
-        stats = np.zeros(iterations)
-        for k in range(iterations):
-            new_x = random.choices(list(x) + list(y), k=len(x))
-            new_y = random.choices(list(x) + list(y), k=len(y))
-            stats[k] = np.median(new_x) - np.median(new_y)
-        p_value = np.mean(stats > sample_stat)
+        result = permutation_test(data=(_x, _y),
+                                  statistic=statistic,
+                                  permutation_type=permutation_type,
+                                  n_resamples=n_resamples,
+                                  alternative=alternative)
 
-        rec = f"{title}: p-value={p_value:.6f}"
-        print(rec)
+        rec = f"{title}: {result}"
+        if verbose:
+            print(rec)
         self.to_log(rec)
 
-        plt.rcParams["figure.figsize"] = figsize
-        plt.hist(stats, label='Permutation Statistics', bins=bins)
-        plt.axvline(x=sample_stat, c='r', ls='--', label='Sample Statistic')
-        plt.legend()
-        plt.xlabel('Median differences')
-        plt.title(title)
+        return _x, _y, result
 
     def wilcoxon(self,
-                 x,
-                 y,
-                 regime_zero: bool = False,
-                 title: str = None):
+                 x: pd.Series,
+                 y: pd.Series,
+                 alternative: str = 'two-sided',
+                 zero_method: str = 'zsplit',
+                 title: str = None,
+                 verbose: bool = False,
+                 **kwargs):
+        """
+        https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.wilcoxon.html
+
+        def series_changer(x: pd.Series,
+                           y: pd.Series,
+                           value_instead_of_none: int = 0,
+                           func_to_print=print)
+
+        in this method:
+        _x, _y = self.series_changer(x,y,**kwargs)
         """
 
-        """
-        self.to_log(f'\n{title}')
+        _x, _y = self.series_changer(x,y,**kwargs)
 
-        if not regime_zero:
-            for i in y.index:
-                if i not in x.index:
-                    if verbose:
-                        self.to_log(f'There is no tag {i} in the first selection. Deleting this tag.')
-                    y = y.loc[y.index != i]
+        rec1 = f'\n{title}'
+        rec2 = f'\nMethod - {zero_method}, alternative - {alternative}'
+        result = stats.wilcoxon(_x, _y, alternative=alternative, zero_method=zero_method)
+        if verbose:
+            print(rec1)
+            print(rec2)
+            print(result)
+        self.to_log(rec1)
+        self.to_log(rec2)
+        self.to_log(result)
 
-            for i in x.index:
-                if i not in y.index:
-                    if verbose:
-                        self.to_log(f'There is no tag {i} in the second selection. Deleting this tag.')
-                    x = x.loc[x.index != i]
-        else:
-            for i in y.index:
-                if i not in x.index:
-                    if verbose:
-                        self.to_log(
-                            f'There is no tag {i} in the first selection. Adding the tag to the first selection with a null value.')
-                    x.loc[i] = 0
-
-            for i in x.index:
-                if i not in y.index:
-                    if verbose:
-                        self.to_log(f'There is no tag {i} in the second selectio. Adding the tag to the second selection with a null value.')
-                    y.loc[i] = 0
-
-        x.sort_index(inplace=True)
-        y.sort_index(inplace=True)
-
-        for method in ['wilcox', 'pratt', 'zsplit']:
-            for alt in ['greater', 'less', 'two-sided']:
-                rec1 = f'\nMethod - {method}, alternative - {alt}.'
-                rec2 = stats.wilcoxon(x, y, alternative=alt, zero_method=method)
-                print(rec1)
-                print(rec2)
-                self.to_log(rec1)
-                self.to_log(rec2)
+        return _x, _y, result
 
     def timeline(self,
                  metric: str,
@@ -2375,8 +2457,7 @@ class RBCA:
                  step: float,
                  time_start_median: str = None,
                  time_finish_median: str = None,
-                 without_lik: bool = False,
-                 only_with_lick: bool = False,
+                 lick: bool = None,
                  time: float = None,
                  replacing_value='auto',
                  without_dem_base: bool = False,
@@ -2387,62 +2468,247 @@ class RBCA:
                  intellicage=None,
                  parser_condition: dict = None,
                  stat: bool = True,
-                 division_coef: float = None,
-                 plotly_verbose: bool = True):
+                 division_coef: float = 1,
+                 plotly_verbose: bool = True,
+                 output_file: str = 'html'):
         """
         metric:
             gcc (giant cluster component)
             dem_power (number of the edges from a dem)
+            visit_density (gantt chart on visits time)
+            free_bowls_time (gantt chart on non-visit time)
         """
-        _ = self.dynamic_graphs(start=start,
-                                finish=finish,
-                                time_start_median=time_start_median,
-                                time_finish_median=time_finish_median,
-                                slide=slide,
-                                step=step,
-                                without_lik=without_lik,
-                                only_with_lick=only_with_lick,
-                                time=time,
-                                replacing_value=replacing_value,
-                                without_dem_base=without_dem_base,
-                                input_time_interval=input_time_interval,
-                                delete_zero_in_intervals_for_median=delete_zero_in_intervals_for_median,
-                                median_special_time=median_special_time,
-                                dynamic=dynamic,
-                                intellicage=intellicage,
-                                parser_condition=parser_condition,
-                                stat=stat,
-                                division_coef=division_coef)
+        if metric == 'gcc' or metric == 'dem_power':
+            _ = self.dynamic_graphs(start=start,
+                                    finish=finish,
+                                    time_start_median=time_start_median,
+                                    time_finish_median=time_finish_median,
+                                    slide=slide,
+                                    step=step,
+                                    lick=lick,
+                                    time=time,
+                                    replacing_value=replacing_value,
+                                    without_dem_base=without_dem_base,
+                                    input_time_interval=input_time_interval,
+                                    delete_zero_in_intervals_for_median=delete_zero_in_intervals_for_median,
+                                    median_special_time=median_special_time,
+                                    dynamic=dynamic,
+                                    intellicage=intellicage,
+                                    parser_condition=parser_condition,
+                                    stat=stat,
+                                    division_coef=division_coef)
 
-        data = pd.DataFrame(self.log['graph_analysis'])
+            data = pd.DataFrame(self.log['graph_analysis'])
 
-        for stage, file_names in self.dict_names.items():
-            for file_name in file_names:
+            for stage, file_names in self.dict_names.items():
+                for file_name in file_names:
+                    data_for_plot = data.loc[(data['Stage name'] == stage) & (
+                            data['Name file'] == file_name)]
 
-                data_for_plot = data.loc[(data['Stage name'] == stage) & (data['Name file'] == file_name)]
+                    all_tags = list(set(list(self.animal_file.loc[
+                                                 (self.animal_file['Group'] == file_name.split(' ')[0]),
+                                                 'Animal ID'])))
 
-                fig = go.Figure(layout=go.Layout(
-                    title=go.layout.Title(text=f'Metric: {metric}. Stage: {stage}. File: {file_name}')))
-                if metric == 'gcc':
-                    fig.add_trace(go.Scatter(x=data_for_plot['Time finish'],
-                                             y=100 * data_for_plot['Number of connected nodes'] /
-                                               len(self.log['unique tags (file)'][file_name]),
-                                             name='Number of connected nodes'))
-                elif metric == 'dem_power':
-                    for dem in self.log['demonstrators'][file_name]:
-                        sup_plot_array = []
-                        for list_ in list(data['Edges from dem']):
-                            if list_ is not None:
-                                for cortege in list_:
-                                    if cortege[0] == dem:
-                                        sup_plot_array.append(cortege[1])
-                            else:
-                                sup_plot_array.append(0)
+                    fig = go.Figure(layout=go.Layout(
+                        title=go.layout.Title(text=f'Metric: {metric}. Stage: {stage}. File: {file_name}')))
 
+                    if metric == 'gcc':
                         fig.add_trace(go.Scatter(x=data_for_plot['Time finish'],
-                                                 y=np.array(sup_plot_array) /
-                                                   len(self.log['unique tags (file)'][file_name]),
-                                                 name=f'Number of edges from {dem}'))
-                if plotly_verbose:
-                    fig.show()
-                fig.write_html(f"{self.output_path}\\{metric}-{stage}-{file_name}.html")
+                                                 y=100 * data_for_plot['Number of connected nodes'] / len(all_tags),
+                                                 name='Number of connected nodes'))
+                        if plotly_verbose:
+                            fig.show()
+
+                        if output_file == 'html':
+                            fig.write_html(f"{self.output_path}\\{metric}-{stage}-{file_name}.html")
+                        else:
+                            iplot(fig,
+                                  validate=False,
+                                  filename=f"{metric}-{stage}-{file_name}",
+                                  image_width=1000,
+                                  image_height=600,
+                                  image=output_file)
+
+                    elif metric == 'dem_power':
+                        for dem in self.log['demonstrators'][file_name]:
+                            sup_plot_array = []
+                            for list_ in list(data['Edges from dem']):
+                                if list_ is not None:
+                                    for cortege in list_:
+                                        if cortege[0] == dem:
+                                            sup_plot_array.append(cortege[1])
+                                else:
+                                    sup_plot_array.append(0)
+
+                            fig.add_trace(go.Scatter(x=data_for_plot['Time finish'],
+                                                     y=np.array(sup_plot_array) / len(all_tags),
+                                                     name=f'Number of edges from {dem}'))
+                        if plotly_verbose:
+                            fig.show()
+
+                        if output_file == 'html':
+                            fig.write_html(f"{self.output_path}\\{metric}-{stage}-{file_name}.html")
+                        else:
+                            iplot(fig,
+                                  validate=False,
+                                  filename=f"{metric}-{stage}-{file_name}",
+                                  image_width=1000,
+                                  image_height=600,
+                                  image=output_file)
+
+        elif metric == 'visit_density':
+            for stage, file_names in self.dict_names.items():
+                for file_name in file_names:
+                    data_from_parser = self.parser(name_base=file_name,
+                                                   name_stage=stage,
+                                                   name_group=file_name.split(' ')[0],
+                                                   lick=lick,
+                                                   time=time,
+                                                   without_dem=without_dem_base,
+                                                   time_start=start,
+                                                   time_finish=finish,
+                                                   intellicage=intellicage,
+                                                   condition=parser_condition)
+
+                    all_tags = list(set(list(self.animal_file.loc[
+                                                 (self.animal_file['Group'] == file_name.split(' ')[0]),
+                                                 'Animal ID'])))
+
+                    unique_tags = list(data_from_parser[0]['Tag'].unique())
+                    start_of_slice = sorted(list(data_from_parser[0]['_StartTime']))[0]
+                    finish_for_empty = pd.Timestamp(start_of_slice) + pd.offsets.DateOffset(microseconds=1)
+
+                    for tag in all_tags:
+                        for corner in self.corners:
+                            if tag not in unique_tags:
+                                data_from_parser[0].loc[f'{tag}_({corner})',
+                                                        ['Tag',
+                                                         'Corner',
+                                                         '_StartTime',
+                                                         '_EndTime']] = [tag,
+                                                                         corner,
+                                                                         start_of_slice,
+                                                                         finish_for_empty]
+                            elif corner not in list(
+                                    data_from_parser[0][data_from_parser[0]['Tag'] == tag]['Corner'].unique()):
+                                data_from_parser[0].loc[f'{tag}_({corner})',
+                                                        ['Tag',
+                                                         'Corner',
+                                                         '_StartTime',
+                                                         '_EndTime']] = [tag,
+                                                                         corner,
+                                                                         start_of_slice,
+                                                                         finish_for_empty]
+                    sup_list_for_plot = []
+
+                    data_from_parser[0]['Tag_Corner'] = data_from_parser[0]['Tag']. \
+                                                            apply(lambda x: str(int(x))) + \
+                                                        ' (' + data_from_parser[0]['Corner']. \
+                                                            apply(lambda x: str(int(x))) + \
+                                                        ')'
+
+                    for index, row in data_from_parser[0].iterrows():
+                        sup_list_for_plot.append(dict(Visit='',
+                                                      Start=row['_StartTime'],
+                                                      Finish=row['_EndTime'],
+                                                      Tag_Corner=row['Tag_Corner']))
+
+                    frame_for_plot = pd.DataFrame(sup_list_for_plot)
+                    frame_for_plot.sort_values('Tag_Corner', inplace=True, ascending=False)
+
+                    fig = px.timeline(data_frame=frame_for_plot,
+                                      x_start="Start",
+                                      x_end="Finish",
+                                      y="Tag_Corner",
+                                      color='Visit',
+                                      opacity=1,
+                                      title=f'Metric: {metric}. Stage: {stage}. File: {file_name}')
+                    fig.update_layout(xaxis=dict(showgrid=False),
+                                      yaxis=dict(showgrid=False))
+
+                    fig.update_layout(template='plotly_white')
+                    fig.update_traces(marker=dict(color='black'))
+                    # fig.update_xaxes(linecolor='black')
+                    # fig.update_yaxes(linecolor='black')
+
+                    if plotly_verbose:
+                        fig.show()
+
+                    if output_file == 'html':
+                        fig.write_html(f"{self.output_path}\\{metric}-{stage}-{file_name}.html")
+                    else:
+                        iplot(fig,
+                              validate=False,
+                              filename=f"{metric}-{stage}-{file_name}",
+                              image_width=1000,
+                              image_height=600,
+                              image=output_file)
+
+        elif metric == 'free_bowls_time':
+            for stage, file_names in self.dict_names.items():
+                for file_name in file_names:
+                    sup_list_for_plot = []
+                    data_from_parser = self.parser(name_base=file_name,
+                                                   name_stage=stage,
+                                                   name_group=file_name.split(' ')[0],
+                                                   lick=lick,
+                                                   time=time,
+                                                   without_dem=without_dem_base,
+                                                   time_start=start,
+                                                   time_finish=finish,
+                                                   intellicage=intellicage,
+                                                   condition=parser_condition)
+                    for index, row in data_from_parser[0].iterrows():
+                        sup_list_for_plot.append(dict(File=f'{stage}-{file_name}',
+                                                      Start=row['_StartTime'],
+                                                      Finish=row['_EndTime'],
+                                                      Visits=''))
+
+                    frame_for_plot = pd.DataFrame(sup_list_for_plot)
+                    fig = px.timeline(data_frame=frame_for_plot,
+                                      x_start="Start",
+                                      x_end="Finish",
+                                      y="File",
+                                      color='Visits',
+                                      opacity=1,
+                                      title=f'Metric: {metric}. Stage: {stage}. File: {file_name}'
+                                      )
+
+                    fig.update_layout(xaxis=dict(showgrid=False),
+                                      yaxis=dict(showgrid=False))
+
+                    # =========================================================== customizable
+                    if parser_condition is not None:
+                        for name_stage in parser_condition.keys():
+                            if stage == name_stage:
+                                for name_base in parser_condition[stage]:
+                                    if file_name == name_base:
+                                        if parser_condition[stage][file_name][:4] == 'time':
+                                            condition_sup_list = parser_condition[stage][file_name].split('|')
+                                            if len(condition_sup_list[1:]) > 2 and len(condition_sup_list[1:])%2 == 0:
+                                                starts = a[1:-1:2]
+                                                ends = a[2:-1:2]
+                                                sup_time_list = list(zip(starts, ends))
+
+                                                sup_list_for_breaks = []
+                                                for slice in sup_time_list:
+                                                    sup_list_for_breaks.append(dict(bounds=[slice[0],slice[1]]))
+                                                fig.update_xaxes(rangebreaks=sup_list_for_breaks)
+
+                    fig.update_layout(template='plotly_white')
+                    fig.update_traces(marker=dict(color='black'))
+                    # fig.update_xaxes(linecolor='black')
+                    # fig.update_yaxes(linecolor='black')
+
+                    if plotly_verbose:
+                        fig.show()
+
+                    if output_file == 'html':
+                        fig.write_html(f"{self.output_path}\\{metric}-{stage}-{file_name}.html")
+                    else:
+                        iplot(fig,
+                              validate=False,
+                              filename=f"{metric}-{stage}-{file_name}",
+                              image_width=1000,
+                              image_height=600,
+                              image=output_file)
