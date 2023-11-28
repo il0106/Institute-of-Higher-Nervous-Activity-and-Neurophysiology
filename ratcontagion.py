@@ -2316,6 +2316,7 @@ class RBCA:
                 self.to_log(f'\nBin boundaries: {[int(x) for x in list(bins)]}')
 
         return return_dict
+<<<<<<< HEAD
 
     @staticmethod
     def series_changer(x: pd.Series,
@@ -2363,6 +2364,8 @@ class RBCA:
         _y.sort_index(inplace=True)
 
         return _x, _y
+=======
+>>>>>>> 72ba4e71323b7d4dc3b8184a5af3929f96e9ae14
 
     def permutation(self,
                     x: pd.Series,
@@ -2514,6 +2517,7 @@ class RBCA:
 
                     if metric == 'gcc':
                         fig.add_trace(go.Scatter(x=data_for_plot['Time finish'],
+<<<<<<< HEAD
                                                  y=100 * data_for_plot['Number of connected nodes'] / len(all_tags),
                                                  name='Number of connected nodes'))
                         if plotly_verbose:
@@ -2712,3 +2716,11 @@ class RBCA:
                               image_width=1000,
                               image_height=600,
                               image=output_file)
+=======
+                                                 y=np.array(sup_plot_array) /
+                                                   len(self.log['unique tags (file)'][file_name]),
+                                                 name=f'Number of edges from {dem}'))
+                if plotly_verbose:
+                    fig.show()
+                fig.write_html(f"{self.output_path}\\{metric}-{stage}-{file_name}.html")
+>>>>>>> 72ba4e71323b7d4dc3b8184a5af3929f96e9ae14
