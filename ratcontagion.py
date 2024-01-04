@@ -2101,11 +2101,14 @@ class RBCA:
 
             if verbose:
                 fig, ax = plt.subplots(figsize=size)
-                n, bins, _ = ax.hist(base, bins=bins, log=False, density=density)
-                self.label_densityhist(ax, n, bins, x=4, y=0.01, r=2)
+                n, _bins, _ = ax.hist(base, bins=bins, log=False, density=density)
+
+                if density:
+                    self.label_densityhist(ax, n, bins=_bins, x=4, y=0.01, r=2)
+                    ax.axes.yaxis.set_ticks([])
+
                 ax.set_title(stage)
-                ax.axes.yaxis.set_ticks([])
-                self.to_log(f'\nBin boundaries: {[int(x) for x in list(bins)]}')
+                self.to_log(f'\nBin boundaries: {[int(x) for x in list(_bins)]}')
 
         return return_dict
 
@@ -2275,13 +2278,13 @@ class RBCA:
 
                     if len(diff) > 0:
                         fig, ax = plt.subplots()
-                        n, bins, _ = plt.hist(diff,
+                        n, _bins, _ = plt.hist(diff,
                                               bins=None,
                                               log=False,
                                               density=density,
                                               range=hist_range_detailed)
-                        self.label_densityhist(ax, n, bins, x=4, y=0.01, r=2)
-                        plt.title(f'{tag} : {diff} \nBin boundaries: {[int(x) for x in list(bins)]}')
+                        self.label_densityhist(ax, n, bins=_bins, x=4, y=0.01, r=2)
+                        plt.title(f'{tag} : {diff} \nBin boundaries: {[int(x) for x in list(_bins)]}')
                         ax.axes.yaxis.set_ticks([])
 
             base = base_
@@ -2305,18 +2308,110 @@ class RBCA:
 
             if verbose:
                 fig, ax = plt.subplots(figsize=size)
-                n, bins, _ = ax.hist(base,
+                n, _bins, _ = ax.hist(base,
                                      bins=bins,
                                      log=False,
                                      density=density,
                                      range=hist_range)
-                self.label_densityhist(ax, n, bins, x=4, y=0.01, r=2)
+                if density:
+                    self.label_densityhist(ax, n, bins=_bins, x=4, y=0.01, r=2)
+                    ax.axes.yaxis.set_ticks([])
+
                 ax.set_title(stage)
-                ax.axes.yaxis.set_ticks([])
-                self.to_log(f'\nBin boundaries: {[int(x) for x in list(bins)]}')
+                self.to_log(f'\nBin boundaries: {[int(x) for x in list(_bins)]}')
 
         return return_dict
-<<<<<<< HEAD
+
+    def eda_target(self,
+                   target_column_name = str,
+                   column_name_for_group = str,
+                   group_func: str = 'sum',
+                   lick: bool = None,
+                   time: float = None,
+                   verbose: bool = False,
+                   without_dem: bool = False,
+                   time_start: str = None,
+                   time_finish: str = None,
+                   intellicage=None,
+                   condition: dict = None,
+                   parser_condition: dict = None,
+                   density: bool = True,
+                   bins: int = 12,
+                   size: tuple = (5, 5),
+                   hist_range: tuple = (0, 1000)):
+        """
+        column_name_for_group - колонка по которой идет группировка
+        target_column_name - название колонки, которую хотим проанализировать
+
+        N.B. Здесь есть customizable
+        """
+
+        return_dict = {}
+
+        for stage, file_names in self.dict_names.items():
+            bases = {}
+            bases_tags = {}
+            bases_dem_tags = {}
+            tags_in_animal = {}
+
+            # =========================================================== customizable
+            if condition is not None and stage in list(condition.keys()):
+                final_without_dem = condition[stage]
+            else:
+                final_without_dem = without_dem
+            # ===========================================================
+
+            for name_base in file_names:
+                name_group = name_base.split(' ')[0]
+
+                tags_in_animal[name_base] = \
+                    self.animal_file[self.animal_file['Group']==name_group]\
+                    [self.animal_file['Demonstrator']=='0']['Animal ID'].to_list() if final_without_dem else \
+                    self.animal_file[self.animal_file['Group'] == name_group]['Animal ID'].to_list()
+
+                bases[name_base], \
+                bases_tags[name_base], \
+                bases_dem_tags[name_base] = self.parser(name_base=name_base,
+                                                        name_stage=stage,
+                                                        name_group=name_group,
+                                                        lick=lick,
+                                                        time=time,
+                                                        without_dem=final_without_dem,
+                                                        time_start=time_start,
+                                                        time_finish=time_finish,
+                                                        intellicage=intellicage,
+                                                        condition=parser_condition)
+
+            base = pd.concat([*bases.values()], ignore_index=True)
+            base = base.groupby([column_name_for_group]).agg({target_column_name: group_func})
+
+            for tags in tags_in_animal.values():
+                for tag in tags:
+                    if tag not in base.index and tag is not None:
+                        base.loc[tag] = 0
+
+            return_dict[stage] = base
+
+            self.to_log(f'\n======= Rat tags in groups =======')
+            for k, v in bases_tags.items():
+                self.to_log(f'{k, v}')
+            self.to_log(f'\n======= Information on the whole {stage} =======')
+            self.to_log(base)
+
+            if verbose:
+                fig, ax = plt.subplots(figsize=size)
+                n, _bins, _ = ax.hist(base.values,
+                                     bins=bins,
+                                     log=False,
+                                     density=density,
+                                     range=hist_range)
+                if density:
+                    self.label_densityhist(ax, n, bins=_bins, x=4, y=0.01, r=2)
+                    ax.axes.yaxis.set_ticks([])
+                ax.set_title(stage)
+                self.to_log(f'\nBin boundaries: {[int(x) for x in list(_bins)]}')
+
+        return return_dict
 
     @staticmethod
     def series_changer(x: pd.Series,
@@ -2364,8 +2459,6 @@ class RBCA:
         _y.sort_index(inplace=True)
 
         return _x, _y
-=======
->>>>>>> 72ba4e71323b7d4dc3b8184a5af3929f96e9ae14
 
     def permutation(self,
                     x: pd.Series,
@@ -2517,7 +2610,6 @@ class RBCA:
 
                     if metric == 'gcc':
                         fig.add_trace(go.Scatter(x=data_for_plot['Time finish'],
-<<<<<<< HEAD
                                                  y=100 * data_for_plot['Number of connected nodes'] / len(all_tags),
                                                  name='Number of connected nodes'))
                         if plotly_verbose:
@@ -2716,11 +2808,3 @@ class RBCA:
                               image_width=1000,
                               image_height=600,
                               image=output_file)
-=======
-                                                 y=np.array(sup_plot_array) /
-                                                   len(self.log['unique tags (file)'][file_name]),
-                                                 name=f'Number of edges from {dem}'))
-                if plotly_verbose:
-                    fig.show()
-                fig.write_html(f"{self.output_path}\\{metric}-{stage}-{file_name}.html")
->>>>>>> 72ba4e71323b7d4dc3b8184a5af3929f96e9ae14
