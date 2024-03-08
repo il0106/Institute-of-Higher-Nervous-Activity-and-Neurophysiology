@@ -508,7 +508,7 @@ class RBCA:
 
             base['VisitDuration'] = pd.to_numeric(base['VisitDuration'])
 
-        # =========================================================== customizable
+        # =========================================================== customizable conditions
         if condition is not None and len(base) > 0:
             for stage in condition.keys():
                 if stage == name_stage:
@@ -951,7 +951,7 @@ class RBCA:
                 Example: 'Stage 1'
             names_of_files: list
                 List with file names where visit data is.
-            without_lik: bool
+            without_lick: bool
                 See the parameter 'without_lik' of the 'parser' method.
             only_with_lick: bool
                 See the parameter 'only_with_lik' of the 'parser' method.
@@ -1141,6 +1141,7 @@ class RBCA:
             self.to_log(f'Median in {k} = {time_interval}')
 
             v.sort_values(by=['_StartTime'], inplace=True)
+
             if input_time_interval == 'auto':
                 graph_dict = self.graph(v,
                                         bases_tags[k],
@@ -2573,6 +2574,9 @@ class RBCA:
             dem_power (number of the edges from a dem)
             visit_density (gantt chart on visits time)
             free_bowls_time (gantt chart on non-visit time)
+
+        step в минутах (используется для gcc и dem_power в динамических графах)
+
         """
         if metric == 'gcc' or metric == 'dem_power':
             _ = self.dynamic_graphs(start=start,
@@ -2695,14 +2699,16 @@ class RBCA:
                                                                          corner,
                                                                          start_of_slice,
                                                                          finish_for_empty]
-                    sup_list_for_plot = []
 
                     data_from_parser[0]['Tag_Corner'] = data_from_parser[0]['Tag']. \
-                                                            apply(lambda x: str(int(x))) + \
+                                                            apply(lambda x: str(int(x)) \
+                        if x not in self.log['demonstrators'][file_name] else str(int(x))+' (dem) '
+                                                                  ) + \
                                                         ' (' + data_from_parser[0]['Corner']. \
                                                             apply(lambda x: str(int(x))) + \
                                                         ')'
 
+                    sup_list_for_plot = []
                     for index, row in data_from_parser[0].iterrows():
                         sup_list_for_plot.append(dict(Visit='',
                                                       Start=row['_StartTime'],
@@ -2711,6 +2717,10 @@ class RBCA:
 
                     frame_for_plot = pd.DataFrame(sup_list_for_plot)
                     frame_for_plot.sort_values('Tag_Corner', inplace=True, ascending=False)
+
+                    first_part = frame_for_plot.loc[~frame_for_plot['Tag_Corner'].str.contains('dem')]
+                    second_part = frame_for_plot.loc[frame_for_plot['Tag_Corner'].str.contains('dem')]
+                    frame_for_plot = pd.concat([first_part, second_part], ignore_index=True)
 
                     fig = px.timeline(data_frame=frame_for_plot,
                                       x_start="Start",
@@ -2722,9 +2732,30 @@ class RBCA:
                     fig.update_layout(xaxis=dict(showgrid=False),
                                       yaxis=dict(showgrid=False))
 
+                    # =========================================================== customizable
+                    start_for_plot, finish_for_plot = None, None
+                    if parser_condition and stage in parser_condition:
+                        for stage_, files_dict in parser_condition.items():
+                            if files_dict.get(file_name):
+                                condition_str_divided = files_dict[file_name].split('|')
+                                if len(condition_str_divided )==3: # стандартное условие с time
+                                    start_for_plot = datetime.strptime(condition_str_divided[1],'%Y-%m-%d_%H:%M:%S')
+                                    finish_for_plot = datetime.strptime(condition_str_divided[2],'%Y-%m-%d_%H:%M:%S')
+                                    break
+
+                    if not start_for_plot and not finish_for_plot:
+                        start_for_plot = datetime.strptime(start, '%Y-%m-%d_%H:%M:%S')
+                        finish_for_plot = datetime.strptime(finish, '%Y-%m-%d_%H:%M:%S')
+
+                    fig.update_layout(xaxis=dict(
+                        fixedrange=True,
+                        range=[start_for_plot, finish_for_plot],
+                        tickformat='%H:%M'))
+                    # ===========================================================
+
                     fig.update_layout(template='plotly_white')
                     fig.update_traces(marker=dict(color='black'))
-                    # fig.update_xaxes(linecolor='black')
+                    # fig.update_xaxes(linecolor='black')               # мешало денситометрии
                     # fig.update_yaxes(linecolor='black')
 
                     if plotly_verbose:
