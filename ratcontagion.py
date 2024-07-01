@@ -60,8 +60,8 @@ class RBCA:
             output_path: str
                 Path to the folder where you want to store the output files.
             name_animal_file: str
-                Name of your animal file (.html). It must be in the 'input_path'.
-                Example: 'Animal' (it must be a html-file)
+                Name of your animal file. It must be in the 'input_path'.
+                Example: 'Animal' (it must be a html/csv/xlsx file, but the most preferred is xlsx, because it's explored more)
             dict_names: dict
                 Dictionary with lists of file names in the input path.
                 Each name in the list is the name of the file where the visit data is located.
@@ -71,17 +71,18 @@ class RBCA:
                 Mistake: {'condition 1':['group1 stage 1', 'group1 stage 2', 'group2 stage 1']}
                 Right example: {'condition 1':['group1 stage 1', 'group2 stage 1'],
                                 'condition 2':['group1 stage 2']}
+            corners: list
+                List with original corner labels
+                Example: [1,2] or [1]
             show_warnings: bool
-                Show warnings (pandas, plotly etc.) or not. Default value is False.
+                Show warnings (pandas, plotly etc.) or not. Default value is True.
                 Example: True or False
-
-            corners: [1,2] list with original corner labels
         ------------
         Return:
-            Class instance of the experiment. 
+            Class instance of the experiment.
         ------------
         Pay attention:
-            There are no static or class methods in this class, all methods are instance methods.
+            There are static methods in this class.
         """
 
         self.input_path = input_path
@@ -93,7 +94,11 @@ class RBCA:
         self.log = {'medians': {},
                     'graph_analysis': defaultdict(list),
                     'unique tags (slice)': {},
-                    'demonstrators': {}}
+                    'demonstrators': {},
+                    'without_dem': {},
+                    'tags_out_bounds': {},
+                    'inner_tags':{}}
+        self.global_oper = 0
 
         if not show_warnings:
             warnings.filterwarnings("ignore")
@@ -111,17 +116,48 @@ class RBCA:
             self.animal_file['Demonstrator'] = self.animal_file['Demonstrator'].fillna(0).astype(int)
             self.animal_file = self.animal_file.astype(str)
 
+
     def to_log(self,
                record):
+        """
+        ------------
+        Function:
+            Logging to file (log.txt)
+        ------------
+        Parameters:
+            record: Any
+        ------------
+        Return:
+            None
+        ------------
+        Side effect:
+            Write needed input record to the log
+        """
+
         if self.output_path is not None:
             file_name = f'{self.output_path}\\log.txt'
             with open(file_name, 'a', newline='', encoding='utf-8') as f:
                 f.write(f'{datetime.now()}_________________________ {record}\n')
 
+
     def file_opener(self,
                     base,
-                    file_name,
+                    file_name: str,
                     zip_: bool = False):
+        """
+        ------------
+        Function:
+            Open html/xlsx/csv files (also in zip)
+        ------------
+        Parameters:
+            base: iterable
+                List with file names in the directory
+            file_name: str
+                Name of the necessary file
+        ------------
+        Return:
+            pandas.Dataframe from panel data in the file
+        """
 
         raw_file = None
         for inner_file_name in base:
@@ -148,6 +184,7 @@ class RBCA:
             self.to_log(f'\nThere is no the {file_name} in the directory {self.input_path}')
 
         return raw_file
+
 
     def date_transformer(self,
                          df,
@@ -191,6 +228,7 @@ class RBCA:
                     self.to_log(f'\nError (func - date_transformer): date = {date}, sup_list = {sup_list}.')
         return sup_list
 
+
     @staticmethod
     def time_operator(time,
                       shift_time,
@@ -221,6 +259,7 @@ class RBCA:
         else:
             return None
 
+
     def intellicage_parser(self,
                            name_base: str,
                            illumination='all_time'):
@@ -230,11 +269,6 @@ class RBCA:
             Function to upload data from the IntelliCage output archives (.zip files).
         ------------
         Parameters:
-            input_path: str
-                Path to the folder where are the necessary files.
-                You can define zipped or non zipped folders. But if you prefer to work with the IntelliCage archives,
-                then your folder need to be non zipped.
-                Example: r"C:/Users/...input" (the slashes were flipped for this example)
             name_base: str
                 Name of the file to upload data with visits.
             illumination: True or False or 'all_time'
@@ -242,14 +276,6 @@ class RBCA:
                 If it is False, you will upload data only with zero illumination values (nighttime).
                 If it is 'all_time', you will upload all available data from the IntelliCage archive.
                 Default value is 'all_time'.
-            condition: dict
-                Dictionary where keys are parameters (triggers, flags etc.), and values are
-                changing values for the parameter
-                (see customizable part of this method).
-                Example: {'session1':'last_day','session2':'last_day','session3':'first_6_hours'}
-                You can customize conditions (keys, values and logic).
-                Default value is None.
-                If you do not want to define any conditions, just do not change the default value.  
         ------------
         Return:
             pandas.DataFrame (with visit data from the IntelliCage)
@@ -403,6 +429,7 @@ class RBCA:
 
         return output_visits
 
+
     def parser(self,
                name_base: str,
                name_stage: str,
@@ -425,62 +452,52 @@ class RBCA:
                 Name of the file where the visit data is located. The first word must be the name of a rat group and
                 after that it must be space. 
                 Example: 'control1 session2' or 'name_group session1 stage 2'
+            name_stage: str
+                Name particular stage gor the group. It defines conditions/environment or other artifacts you wish.
+                This name, strictly speaking, goes after group name and space in file name.
+                Example: 'stage 1'
             name_group: str
                 Name of the particular rat group in the visit data. It must be the first word (with space after that)
                 in the 'name_base'.
                 Example: 'group1'
-            name_animal: str
-                Name of the file where animal data is located.
-                Example: 'Animal' (it must be a html-file)
-            input_path: str
-                Path to the folder where are the necessary files.
-                You can define zipped or non zipped folders. But if you prefer to work with the IntelliCage archives,
-                then your folder need to be non zipped.
-                Example: r"C:/Users/...input" (the slashes were flipped for this example)
-            without_lik: bool
-                Filter the data so that only rats that didn't drink remain. It raises error if you define 'without_lik'
-                and 'only_with_lik' as True. Both True means all data will be downloaded. Default value is False.
-                Example: True or False
-            only_with_lick: bool
-                Filter the data so that only rats that did drink remain. Default value is False.
-                Example: True or False
+            lick: bool or None
+                True - gather only data where a rat perform licks.
+                False - take only data without drinking.
+                None - all data upload regardless drinking.
             time: float
                 Time (minutes only) since the beginning of the file. Default value is None.
                 Example: 30 or 30.5
-            verbose: bool
-                Displaying information while the algorithm is running. Default value is False.
-                Example: True or False 
             without_dem: bool
                 Removing rows where demonstrator is. Default value is False.
                 Example: True or False
             time_start: str
                 Particular start time to download the data (if your 'time_start' is less than the original start time 
                 in the file, 'time_start' will equal to the original start time). Default value is None.
-                Example: '12:30:45' (12 hours 30 minutes 45 seconds)
+                Example: '12:30:45' or '2022-01-01_00:00:00' 
             time_finish: str
                 Particular finish time to download the data (if your 'time_finish' is higher than the original
                 finish time
                 in the file, 'start_time' will be equal to the original start time). Default value is None.
-                Example: '12:30:45'
+                Example: '12:30:45' or '2022-01-01_00:00:00'
             intellicage: bool or 'all_time'
-
+                See 'illumination' parameter in intellicage_parser signature.
                 Example: True, False or 'all_time'
-
-            dict
-                It is dictionary where you put intellicage_parser's parameters (See the 'intellicage_parser' method).
+            condition: dict
+                It is dictionary where you put parameters (See the 'parser' method).
                 Default value is None.
-                Example: {'illumination':'all_time', 
+                Example: {'illumination':'all_time',
                           'condition': {'session1':'last_day',
                                         'session2':'last_day',
                                         'session3':'first_day',
                                         'date':time}}
-            condition: dict
-                The same signature as 'condition' in the intellicage parameter of the parser method.
         ------------
         Return:
             DataFrame with behavioral data,
             list with ordinary rat tags in this data (example: [12345678,87654321]), 
             list with demonstrator's tag (example: [12345678])
+        ------------
+        Pay attention:
+            'condition' parameter is fully customizable and can be hardcoded as you wish, see 'customizable' in this method.
         """
 
         if self.input_path.endswith('.zip'):
@@ -508,7 +525,7 @@ class RBCA:
 
             base['VisitDuration'] = pd.to_numeric(base['VisitDuration'])
 
-        # =========================================================== customizable conditions
+        # =========================================================== customizable
         if condition is not None and len(base) > 0:
             for stage in condition.keys():
                 if stage == name_stage:
@@ -558,6 +575,14 @@ class RBCA:
                                                   (self.animal_file['Group'] == name_group),
                                                   'Animal ID'])))
 
+        if name_stage not in self.log['inner_tags']:
+            self.log['inner_tags'][name_stage] = {name_base:{}}
+        for i in list(self.animal_file.loc[self.animal_file['Group'] == name_group, 'Animal ID']):
+            if name_base not in self.log['inner_tags'][name_stage]:
+                self.log['inner_tags'][name_stage][name_base]={}
+            self.log['inner_tags'][name_stage][name_base][i] = self.global_oper
+            self.global_oper += 1
+
         base['Tag'] = base['Tag'].astype(str)
 
         dem_in_base = []
@@ -578,6 +603,11 @@ class RBCA:
             base_out_dem = base.drop(dem_in_base, axis=0)
         else:
             base_out_dem = base
+
+        if name_stage not in self.log['without_dem']:
+            self.log['without_dem'][name_stage] = {name_base: without_dem}
+        else:
+            self.log['without_dem'][name_stage][name_base] = without_dem
 
         self.log['unique tags (slice)'][name_base] = list(base_out_dem['Tag'].unique())
 
@@ -641,6 +671,7 @@ class RBCA:
 
         return base_out_dem, base_list, dem_in_base
 
+
     @staticmethod
     def inner_analysis(data,
                        data_,
@@ -663,9 +694,10 @@ class RBCA:
             time_interval: float
                 Float number of seconds.
                 Example: 12.4
-            name_of_group: str
-                Name of the particular rat group in the visit data. It must be the first word (with space after that)
-                in the 'name_base'.
+            special_name: str
+                Custom string identifier for necessary rat group.
+                This name is used in column naming during data processing.
+                Example: 'visits in stage1 group1'
         ------------
         Return:
             Dictionary where keys are rat tags and each value is a pandas.DataFrame with followers gathered from one
@@ -725,14 +757,27 @@ class RBCA:
 
         return sup_dict
 
-    @staticmethod
-    def combiner(dict1: dict,
+
+    def combiner(self,
+                 dict1: dict,
                  dict2: dict):
         """
-        :param dict1:
-        :param dict2:
-        :return:
+        ------------
+        Function:
+            Combine data about all rat entries in needed corners.
+        ------------
+        Parameters:
+            dict1: dict
+                Dictionary where keys are rat tags and values are pandas.DataFrame.
+                Indexes in frame are about other rats, which go to a corner after rat in the key.
+                In such frames every value is a number of trips.
+            dict2: dict
+                Exactly like dict1, but another corner.
+        ------------
+        Return:
+            One dictionary with combined data.
         """
+
         if dict1 is not None and len(dict1) > 0 and dict2 is not None and len(dict2) > 0:
             sup_dict_both = {}
             for k, v in dict1.items():
@@ -757,7 +802,44 @@ class RBCA:
         else:
             sup_dict_both = None
 
+        groupname_from_dict = list(list(sup_dict_both.values())[0].columns)[0].split('_')[-1].split()[0] # that's right, because in processing these are the names
+        file_name = list(list(sup_dict_both.values())[0].columns)[0].split('_')[-1]
+
+        stage_name = None
+        for stage in self.dict_names:
+            if stage in list(list(sup_dict_both.values())[0].columns)[0]:
+                stage_name = stage
+
+        if stage_name is None:
+            self.to_log(f'{stage_name} is not founded in {list(list(sup_dict_both.values())[0].columns)[0]}')
+
+        if self.log['without_dem'].get(stage_name):
+            without_dem = self.log['without_dem'][stage_name][file_name]
+        else:
+            without_dem = False
+
+        tags_in_animal = \
+            self.animal_file[self.animal_file['Group'] == groupname_from_dict] \
+                [self.animal_file['Demonstrator'] == '0']['Animal ID'].to_list() if without_dem else \
+                self.animal_file[self.animal_file['Group'] == groupname_from_dict]['Animal ID'].to_list()
+
+        tags_out_bounds = list(set(tags_in_animal)-set(sup_dict_both))
+        tags_in_bounds = list(sup_dict_both)
+
+        if stage_name not in self.log['tags_out_bounds']:
+            self.log['tags_out_bounds'][stage_name] = {file_name:tags_out_bounds}
+        else:
+            self.log['tags_out_bounds'][stage_name][file_name] = tags_out_bounds
+
+        for tag in tags_out_bounds:
+            if tag not in sup_dict_both:
+                sup_dict_both[tag] = pd.DataFrame(columns=[list(list(sup_dict_both.values())[0].columns)[0]],
+                                                  index = tags_in_bounds,
+                                                  data = [0]*len(tags_in_bounds))
+                sup_dict_both[tag].index.name = 'index'
+
         return sup_dict_both
+
 
     def frame_analysis_for_graph(self,
                                  data,
@@ -777,8 +859,6 @@ class RBCA:
         Parameters:
             data: pandas.DataFrame
                 Slice of the data where this function will search for needed intervals after each visit.
-            data_: pandas.DataFrame
-                Slice of the data where this function will search for followers in found intervals.
             tags: list
                 List with needed rat tags.
             dem_tags: list
@@ -791,31 +871,28 @@ class RBCA:
                 The instance of pyvis.network.Network (the method adds nodes and edges from the input dictionary
                 to this structure).
                 Example: pyvis.network.Network()
-            regime:
-                Number of drinking bowls to analyze. Default value is 'both'.
-                Example: 1 or 2 or 'both'
-            data2: pandas.DataFrame
-                Slice of the data where this function will search for needed intervals after each visit. 
-                This parameter is used when you have several drinkers, locations, etc. For example, in our case
-                there were two drinking bowls, so we need two frames per rat. Default value is None.
-            data_2: pandas.DataFrame
-                Slice of the data where this function will search for followers in found intervals.
-                This parameter is used when you have several drinkers, locations, etc.
-                Default value is None.
+            corners: list
+                List with original corner labels
+                Example: [1,2] or [1]
+                Default: None
             dynamic: bool
                 Using 'dynamic' mode, when you want to make a graph with Plotly Time Slider. Default value is False
                 Example: True or False
-            name_of_group: str
-                Name of the particular rat group in the visit data. It must be the first word (with space after that)
-                in the 'name_base'. Default value is '_'.
+            special_name: str
+                Custom string identifier for necessary rat group.
+                This name is used in column naming during data processing.
+                Example: 'visits in stage1 group1'
+                Default: '_'
         ------------
         Return:
-            Side effect is adding nodes and edges to the input pyvis.network.Network.
             Dictionary where keys are rat tags and each value is a pandas.DataFrame with followers gathered from
             all cases.
+        ------------
+        Side effect:
+            Adding nodes and edges to the input pyvis.network.Network.
         """
 
-        name_column = f'Visits in {special_name}'
+        name_column = f'Visits in {special_name}' #customizable
 
         corners_dict = dict.fromkeys(corners)
         for corner in corners:
@@ -833,25 +910,53 @@ class RBCA:
         else:
             final_dict = list(corners_dict.values())[0]
 
-        # --------------------------------------------------
         if not dynamic:
             for k, v in final_dict.items():
+
+                file_name = list(v.columns)[0].split('_')[-1]
+                stage_name = None
+                for stage in self.dict_names:
+                    if stage in list(v.columns)[0]:
+                        stage_name = stage
+                if stage_name is None:
+                    self.to_log(f'{stage_name} is not founded in {list(v.columns)[0]}')
+
+                int_k = int(k)
+                if int_k in net.get_nodes():
+                    int_k = self.log['inner_tags'][stage_name][file_name][k]
+
                 if k in dem_tags:
-                    net.add_node(int(k), label=str(k), color='yellow', title=f'{v}')
+                    net.add_node(int_k, label=str(k), color='yellow', title=f'{v}', shape='star')
+                elif k in str(self.log['tags_out_bounds'][stage_name][file_name]) and v.sum()[0]==0:
+                    net.add_node(int_k, label=str(k), color='grey', title=f'{v}', shape = 'diamond')
                 else:
-                    net.add_node(int(k), label=str(k), color='red', title=f'{v}')
+                    net.add_node(int_k, label=str(k), color='red', title=f'{v}')
 
             sup_graph_list = []
             for k, v in final_dict.items():
+
+                file_name = list(v.columns)[0].split('_')[-1]
+                stage_name = None
+                for stage in self.dict_names:
+                    if stage in list(v.columns)[0]:
+                        stage_name = stage
+                if stage_name is None:
+                    self.to_log(f'{stage_name} is not founded in {list(v.columns)[0]}')
+
+                int_k = int(k)
+                if self.log['inner_tags'][stage_name][file_name][k] in net.get_nodes():
+                    int_k = self.log['inner_tags'][stage_name][file_name][k]
+
                 for tag in v.index:
                     if v.loc[tag, name_column] == 0:
-                        sup_graph_list.append([k, tag])
+                        sup_graph_list.append([int_k, int(tag)])
                     else:
-                        net.add_edge(int(k), int(tag), value=0.01 * int(v.loc[tag, name_column]), color='blue')
+                        net.add_edge(int_k, int(tag), value=0.01 * int(v.loc[tag, name_column]), color='blue')
             for pair in sup_graph_list:
-                net.add_edge(int(pair[0]), int(pair[1]), hidden=True)
+                net.add_edge(pair[0], pair[1], hidden=True)
 
         return final_dict
+
 
     def graph(self,
               input_data,
@@ -878,9 +983,6 @@ class RBCA:
                 The instance of pyvis.network.Network (the method adds nodes and edges from the input dictionary to this
                 structure).
                 Example: pyvis.network.Network()
-            corners:
-                Number of drinking bowls (bowls were in corners) to analyse. Default value is 'both'. 
-                Example: 1 or 2 or 'both'
             time_interval:
                 Float number of seconds. The number of seconds after each visit during which the visits of followers are
                 counted. Default value is None.
@@ -888,13 +990,17 @@ class RBCA:
             dynamic: bool
                 Using 'dynamic' mode, when you want to make a graph with Plotly Time Slider. Default value is False.
                 Example: True or False
-            name_of_group: str
-                Name of the particular rat group in the visit data. It must be the first word (with space after that)
-                in the 'name_base'. Default value is '_'.
+            special_name: str
+                Custom string identifier for necessary rat group.
+                This name is used in column naming during data processing.
+                Example: 'visits in stage1 group1'
+                Default: '_'
         ------------
         Return:
-            Side effect is adding nodes and edges to the input pyvis.network.Network.
             Dictionary where keys are rat tags and each value is a pandas.DataFrame with followers from all cases.
+        ------------
+        Side effect:
+            Adding nodes and edges to the input pyvis.network.Network.
         """
 
         corners_list = []
@@ -921,6 +1027,7 @@ class RBCA:
             graph_dict = None
 
         return graph_dict
+
 
     def work(self,
              title_of_stage: str,
@@ -951,16 +1058,22 @@ class RBCA:
                 Example: 'Stage 1'
             names_of_files: list
                 List with file names where visit data is.
-            without_lick: bool
-                See the parameter 'without_lik' of the 'parser' method.
-            only_with_lick: bool
-                See the parameter 'only_with_lik' of the 'parser' method.
+            lick: bool or None
+                True - gather only data where a rat perform licks.
+                False - take only data without drinking.
+                None - all data upload regardless drinking.
             time: float
                 See the parameter 'time' of the 'parser' method.
             time_start: str
                 See the parameter 'time_start' of the 'parser' method.
             time_finish: str
                 See the parameter 'time_finish' of the 'parser' method.
+            time_start_median: str
+                Specific start time (format is like time_start) to evaluate median for statistics
+                Default is None
+            time_finish_median: str
+                Specific finish time (format is like time_finish) to evaluate median for statistics
+                Default is None
             replacing_value: float
                 Float number of seconds. The number of seconds after each visit during which the visits of followers are
                 counted. Default value is None.
@@ -977,19 +1090,24 @@ class RBCA:
                 of followers are counted. If 'auto', time interval for observing followers' visits will be evaluated
                 automatically. Default value is 'auto'.
                 Example: 'auto' or 12.5 or 50
-            corners:
-                Number of drinking bowls (bowls were in corners) to analyse. Default value is 'both'. 
-                Example: 1 or 2 or 'both'
             without_dem_base: bool
                 See the parameter 'without_dem' of the 'parser' method.
-            verbose: bool
-                Displaying information while the algorithm is running. Default value is False.
-                Example: True or False 
             dynamic: bool
                 Using 'dynamic' mode, when you want to make a graph with Plotly Time Slider. Default value is False.
                 Example: True or False 
-            intellicage: dict
-                See the parameter 'intellicage' of the 'parser' method.              
+            intellicage: bool or 'all_time'
+                See 'illumination' parameter in intellicage_parser signature.
+                Example: True, False or 'all_time'
+            parser_condition: dict
+                It is dictionary where you put parser's parameters (See the 'parser' method).
+                Default value is None.
+                Example: {'illumination':'all_time',
+                          'condition': {'session1':'last_day',
+                                        'session2':'last_day',
+                                        'session3':'first_day',
+                                        'date':time}}
+                This parameter is fully customizable and can be hardcoded as you wish, see 'customizable' in this class
+                    or parser's code.
         ------------
         Return:
              Tuple with:
@@ -1174,6 +1292,7 @@ class RBCA:
 
         return base, list_with_dicts, all_dems
 
+
     def eda_graph(self,
                   lick: bool = None,
                   time: float = None,
@@ -1196,19 +1315,14 @@ class RBCA:
             and also prints information about processed files, individuals, etc.
         ------------
         Parameters:
-            without_lik: bool
-                Filter the data so that only rats that didn't drink remain. It raises error if you define 'without_lik'
-                and 'only_with_lik' as True. Both True means all data will be downloaded. Default value is False.
-                Example: True or False
-            only_with_lick: bool
-                Filter the data so that only rats that did drink remain. Default value is False.
-                Example: True or False
+            lick: bool or None
+                True - gather only data where a rat perform licks.
+                False - take only data without drinking.
+                None - all data upload regardless drinking.
+                Default is None.
             time: float
                 Time (minutes only) since the beginning of the file. Default value is None.
                 Example: 30 or 30.5
-            verbose: bool
-                Displaying information while the algorithm is running. Default value is False.
-                Example: True or False 
             replacing_value: float or 'auto'
                 Float number of seconds. The number of seconds after each visit during which the visits of followers
                 are counted. Default value is 'auto'.
@@ -1221,17 +1335,20 @@ class RBCA:
                 visits of followers are counted. If 'auto', time interval for observing followers' visits will be
                 evaluated automatically. Default value is 'auto'.
                 Example: 'auto' or 12.5 or 50                
-            corners:
-                Number of drinking bowls (bowls were in corners) to analyse. Default value is 'both'. 
-                Example: 1 or 2 or 'both'
             time_start: str
                 Particular start time to download the data (if your 'time_start' is less than the original start time 
                 in the file, 'time_start' will equal to the original start time). Default value is None.
-                Example: '12:30:45' (12 hours 30 minutes 45 seconds)
+                Example: '12:30:45' or '2022-01-01_00:00:00' 
             time_finish: str
                 Particular finish time to download the data (if your 'time_finish' is higher than the original finish
                 time in the file, 'time_finish' will be equal to the original finish time). Default value is None.
-                Example: '12:30:45'            
+                Example: '12:30:45' or '2022-01-01_00:00:00'
+            time_start_median: str
+                Specific start time (format is like time_start) to evaluate median for statistics
+                Default is None
+            time_finish_median: str
+                Specific finish time (format is like time_finish) to evaluate median for statistics
+                Default is None
             delete_zero_in_intervals_for_median: bool
                 Deleting zeros in the median calculation or not. Default value is False.
                 Example: True of False            
@@ -1242,14 +1359,19 @@ class RBCA:
             dynamic: bool
                 Using 'dynamic' mode, when you want to make a graph with Plotly Time Slider. Default value is False.
                 Example: True or False            
-            intellicage: dict
-                It is dictionary where you put intellicage_parser's parameters (See the 'intellicage_parser' method).
+            intellicage: bool or 'all_time'
+                See 'illumination' parameter in intellicage_parser signature.
+                Example: True, False or 'all_time'
+            parser_condition: dict
+                It is dictionary where you put parser's parameters (See the 'parser' method).
                 Default value is None.
-                Example: {'illumination':'all_time', 
+                Example: {'illumination':'all_time',
                           'condition': {'session1':'last_day',
                                         'session2':'last_day',
                                         'session3':'first_day',
                                         'date':time}}
+                This parameter is fully customizable and can be hardcoded as you wish, see 'customizable' in this class
+                    or parser's code.
         ------------
         Return:
             List with tuples.
@@ -1302,6 +1424,7 @@ class RBCA:
                                )
         return output_list
 
+
     @staticmethod
     def graph_plotly(data: dict,
                      dem_tags: list,
@@ -1325,10 +1448,11 @@ class RBCA:
                 Coordinates to draw nodes as rats in the cage. Note pairs of coordinates should be no less than rats.
                 There is no maximum pairs, tags are assigned simply in order to each pair. Default value is 'default'.
                 Example: [(3, 5), (4, 1), (6, 1), (7, 5), (5, 8)]
-            name_of_group: str
-                Name of the particular rat group in the visit data. It must be the first word (with space after that)
-                in the 'name_base' (See the parameter 'name_base' of the 'parser' method). Default value is '_'.
-                Example: 'group1'
+            special_name: str
+                Custom string identifier for necessary rat group.
+                This name is used in column naming during data processing.
+                Example: 'visits in stage1 group1'
+                Default: '_'
         ------------
         Return:
             List with trace with nodes and traces with edges for plotly.graph_objects.Scatter.
@@ -1337,7 +1461,7 @@ class RBCA:
             plotly.graph_objects.Scatter with the label 'No data on drinking bowls'.
         """
 
-        name_column = f'Visits in {special_name}'
+        name_column = f'Visits in {special_name}' # customizable
 
         if coords == 'default':
             coords = [(3, 5), (4, 1), (6, 1), (7, 5), (5, 8)]
@@ -1401,6 +1525,7 @@ class RBCA:
                                marker=dict(size=100),
                                text='No data on drinking bowls')]
 
+
     def dynamic_graph(self,
                       name: str,
                       dict_data: dict):
@@ -1418,8 +1543,11 @@ class RBCA:
                 Dictionary where keys are time (format 'HH:MM') and values are returns from the 'graph_plotly' method.
                 Example: {'12:30': graph_plotly()}
         ------------
-        Return:   
-            Only side effect. It makes a html-file with a dynamic graph.
+        Return:
+              None
+        ------------
+        Side effect:
+            html-file with a dynamic graph.
         """
 
         fig_dict = {"data": [],
@@ -1499,6 +1627,7 @@ class RBCA:
         fig = go.Figure(fig_dict)
         fig.write_html(f"{self.output_path}\\dg_{name}.html")
 
+
     def dynamic_graphs(self,
                        start: str,
                        finish: str,
@@ -1516,7 +1645,6 @@ class RBCA:
                        dynamic: bool = False,
                        intellicage=None,
                        parser_condition: dict = None,
-                       stat: bool = True,
                        division_coef: float = None):
         """
         ------------
@@ -1528,30 +1656,31 @@ class RBCA:
             start: str
                 Particular start time to download the data (if your 'start' is less than the original start time 
                 in the file, 'start' will equal to the original start time).
-                Example: '12:30:45' (12 hours 30 minutes 45 seconds)
+                Example: '12:30:45' or '2022-01-01_00:00:00' 
             finish: str
                 Particular finish time to download the data (if your 'finish' is higher than the original finish time 
                 in the file, 'finish' will be equal to the original finish time).
-                Example: '12:30:45'
+                Example: '12:30:45' or '2022-01-01_00:00:00'
             slide: float
                 Slice (minute time slide) to make one frame for dynamic graph.
                 Example: 30 or 35.5
             step: float
                 Step (minutes) to move time slide of the graph.
                 Example: 10 or 15.5
-            without_lik: bool
-                Filter the data so that only rats that didn't drink remain. It raises error if you define 'without_lik'
-                and 'only_with_lik' as True. Both True means all data will be downloaded. Default value is False.
-                Example: True or False
-            only_with_lick: bool
-                Filter the data so that only rats that did drink remain. Default value is False.
-                Example: True or False
+            time_start_median: str
+                Specific start time (format is like time_start) to evaluate median for statistics
+                Default is None
+            time_finish_median: str
+                Specific finish time (format is like time_finish) to evaluate median for statistics
+                Default is None
+            lick: bool or None
+                True - gather only data where a rat perform licks.
+                False - take only data without drinking.
+                None - all data upload regardless drinking.
+                Default is None.
             time: float
                 Time (minutes only) since the beginning of the file. Default value is None.
                 Example: 30 or 30.5
-            verbose: bool
-                Displaying information while the algorithm is running. Default value is False.
-                Example: True or False 
             replacing_value: float or 'auto'
                 Float number of seconds. The number of seconds after each visit during which the visits of followers are
                 counted.
@@ -1565,9 +1694,6 @@ class RBCA:
                 of followers are counted. If 'auto', time interval for observing followers' visits will be evaluated
                 automatically. Default value is 'auto'.
                 Example: 'auto' or 12.5 or 50
-            corners: 
-                Number of drinking bowls (bowls were in corners) to analyse. Default value is 'both'. 
-                Example: 1 or 2 or 'both'
             delete_zero_in_intervals_for_median: bool
                 Deleting zeros in the median calculation or not. Default value is True.
                 Example: True of False
@@ -1578,20 +1704,31 @@ class RBCA:
             dynamic: bool
                 Using 'dynamic' mode, when you want to make a graph with Plotly Time Slider. Default value is False.
                 Example: True or False 
-            intellicage: dict
-                It is dictionary where you put intellicage_parser's parameters (See the 'intellicage_parser' method).
+            intellicage: bool or 'all_time'
+                See 'illumination' parameter in intellicage_parser signature.
+                Example: True, False or 'all_time'
+            parser_condition: dict
+                It is dictionary where you put parser's parameters (See the 'parser' method).
                 Default value is None.
-                Example: {'illumination':'all_time', 
+                Example: {'illumination':'all_time',
                           'condition': {'session1':'last_day',
                                         'session2':'last_day',
                                         'session3':'first_day',
-                                        'date':time}}    
+                                        'date':time}}
+                This parameter is fully customizable and can be hardcoded as you wish, see 'customizable' in this class
+                    or parser's code.
+            division_coef: float
+                Float number to divide (normalize) metrics (node susceptibility, credibility, graph_weight).
+                Default value is None.
+                Example: 48 or 15.5
         ------------
         Return:
             List with file names and dictionary about graphs (where keys are time and 
             values are dictionaries (keys are file names and values are returns from 'graph_plotly' method)).
                 Example: [names, dynamic_graph_dict]
-            Side effects are html-files with graphs.
+        ------------
+        Side effect:
+            html-files with graphs.
         """
 
         if len(start) > 8 or len(finish) > 8:
@@ -1632,7 +1769,7 @@ class RBCA:
                             intellicage=intellicage,
                             parser_condition=parser_condition)
 
-            if stat:
+            if division_coef:
                 data, _ = self.graph_analysis(division_coef=division_coef,
                                               **sup_args)
             else:
@@ -1675,6 +1812,7 @@ class RBCA:
 
         return [names, final_time_dict]
 
+
     def graph_analysis(self,
                        division_coef: float = None,
                        lick: bool = None,
@@ -1702,19 +1840,14 @@ class RBCA:
                 Float number to divide (normalize) metrics (node susceptibility, credibility, graph_weight).
                 Default value is None.
                 Example: 48 or 15.5
-            without_lik: bool
-                Filter the data so that only rats that didn't drink remain. It raises error if you define 'without_lik'
-                and 'only_with_lik' as True. Both True means all data will be downloaded. Default value is False.
-                Example: True or False
-            only_with_lick: bool
-                Filter the data so that only rats that did drink remain. Default value is False.
-                Example: True or False
+            lick: bool or None
+                True - gather only data where a rat perform licks.
+                False - take only data without drinking.
+                None - all data upload regardless drinking.
+                Default is None.
             time: float
                 Time (minutes only) since the beginning of the file. Default value is None.
                 Example: 30 or 30.5
-            verbose: bool
-                Displaying information while the algorithm is running. Default value is False.
-                Example: True or False 
             replacing_value: float or 'auto'
                 Float number of seconds. The number of seconds after each visit during which the visits of followers are
                 counted. Default value is 'auto'.
@@ -1726,18 +1859,21 @@ class RBCA:
                 Float number of seconds or flag 'auto'. The number of seconds after each visit during which the visits
                 of followers are counted. If 'auto', time interval for observing followers' visits will be evaluated
                 automatically. Default value is 'auto'.
-                Example: 'auto' or 12.5 or 50                
-            corners:
-                Number of drinking bowls (bowls were in corners) to analyse. Default value is 'both'. 
-                Example: 1 or 2 or 'both'
+                Example: 'auto' or 12.5 or 50
             time_start: str
                 Particular start time to download the data (if your 'time_start' is less than the original start time 
                 in the file, 'time_start' will equal to the original start time). Default value is None.
-                Example: '12:30:45' (12 hours 30 minutes 45 seconds)
+                Example: '12:30:45' or '2022-01-01_00:00:00' 
             time_finish: str
                 Particular finish time to download the data (if your 'time_finish' is higher than the original finish
                 time in the file, 'time_finish' will be equal to the original finish time). Default value is None.
-                Example: '12:30:45'            
+                Example: '12:30:45' or '2022-01-01_00:00:00'
+            time_start_median: str
+                Specific start time (format is like time_start) to evaluate median for statistics
+                Default is None
+            time_finish_median: str
+                Specific finish time (format is like time_finish) to evaluate median for statistics
+                Default is None
             delete_zero_in_intervals_for_median: bool
                 Deleting zeros in the median calculation or not. Default value is True.
                 Example: True of False            
@@ -1748,18 +1884,25 @@ class RBCA:
             dynamic: bool
                 Using 'dynamic' mode, when you want to make a graph with Plotly Time Slider. Default value is false.
                 Example: True or False            
-            intellicage: dict
-                It is dictionary where you put intellicage_parser's parameters (See the 'intellicage_parser' method).
+            intellicage: bool or 'all_time'
+                See 'illumination' parameter in intellicage_parser signature.
+                Example: True, False or 'all_time'
+            parser_condition: dict
+                It is dictionary where you put parser's parameters (See the 'parser' method).
                 Default value is None.
-                Example: {'illumination':'all_time', 
+                Example: {'illumination':'all_time',
                           'condition': {'session1':'last_day',
                                         'session2':'last_day',
                                         'session3':'first_day',
                                         'date':time}}
+                This parameter is fully customizable and can be hardcoded as you wish, see 'customizable' in this class
+                    or parser's code.
         ------------
         Return:
             Dictionary, where keys are names of metrics and values are metrics.
-            Side effect: making graph and printing metrics.
+        ------------
+        Side effect:
+            Making graph and printing metrics.
         """
 
         data_for_graph = self.eda_graph(lick=lick,
@@ -1921,6 +2064,7 @@ class RBCA:
 
         return data_for_graph, self.log['graph_analysis']
 
+
     @staticmethod
     def label_densityhist(ax,
                           n,
@@ -1967,6 +2111,7 @@ class RBCA:
             label = str(k[i])
             ax.text(x_pos, y_pos, label)
 
+
     def eda_count(self,
                   lick: bool = None,
                   time: float = None,
@@ -1986,13 +2131,11 @@ class RBCA:
             Method for computing visit statistics on rat groups. 
         ------------
         Parameters:
-            without_lik: bool
-                Filter the data so that only rats that didn't drink remain. It raises error if you define 'without_lik'
-                and 'only_with_lik' as True. Both True means all data will be downloaded. Default value is False.
-                Example: True or False
-            only_with_lick: bool
-                Filter the data so that only rats that did drink remain. Default value is False.
-                Example: True or False
+            lick: bool or None
+                True - gather only data where a rat perform licks.
+                False - take only data without drinking.
+                None - all data upload regardless drinking.
+                Default is None.
             time: float
                 Time (minutes only) since the beginning of the file. Default value is None.
                 Example: 30 or 30.5
@@ -2005,19 +2148,14 @@ class RBCA:
             time_start: str
                 Particular start time to download the data (if your 'start' is less than the original start time 
                 in the file, 'start' will equal to the original start time). Default value is None.
-                Example: '12:30:45' (12 hours 30 minutes 45 seconds)
+                Example: '12:30:45' or '2022-01-01_00:00:00' 
             time_finish: str
                 Particular finish time to download the data (if your 'finish' is higher than the original finish time 
                 in the file, 'finish' will be equal to the original finish time). Default value is None.
-                Example: '12:30:45'
-            intellicage: dict
-                It is dictionary where you put intellicage_parser's parameters (See the 'intellicage_parser' method).
-                Default value is None.              
-                Example: {'illumination':'all_time', 
-                          'condition': {'session1':'last_day',
-                                        'session2':'last_day',
-                                        'session3':'first_day',
-                                        'date':time}}
+                Example: '12:30:45' or '2022-01-01_00:00:00'
+            intellicage: bool or 'all_time'
+                See 'illumination' parameter in intellicage_parser signature.
+                Example: True, False or 'all_time'
             density: bool
                 Parameter density for the histogram. Default value is True.
                 Example: True or False
@@ -2028,8 +2166,19 @@ class RBCA:
                 Tuple with the size parameters in form of (width, height). Default value is (5,5).
                 Example: (10,10)
             condition: dict
-                Dictionary where keys are stage names and values are parameters for the 'parser' method (customizable).
+                Dictionary where keys are stage names and values are parameters for the 'parser' method
+                    (customizable, see in this method code).
                 Example: {'stage1': True} ('without_dem' = True)
+            parser_condition: dict
+                It is dictionary where you put parser's parameters (See the 'parser' method).
+                Default value is None.
+                Example: {'illumination':'all_time',
+                          'condition': {'session1':'last_day',
+                                        'session2':'last_day',
+                                        'session3':'first_day',
+                                        'date':time}}
+                This parameter is fully customizable and can be hardcoded as you wish, see 'customizable' in this class
+                    or parser's code.
         ------------
         Return:
             Dictionary where keys are stage names and values are pandas.DataFrames 
@@ -2113,6 +2262,7 @@ class RBCA:
 
         return return_dict
 
+
     def eda_intervals(self,
                       lick: bool = None,
                       replacing_value='auto',
@@ -2136,13 +2286,11 @@ class RBCA:
             Method for computing intervals (between visits) statistics on rat groups.
         ------------
         Parameters:
-            without_lik: bool
-                Filter the data so that only rats that didn't drink remain. It raises error if you define 'without_lik'
-                and 'only_with_lik' as True. Both True means all data will be downloaded. Default value is False.
-                Example: True or False
-            only_with_lick: bool
-                Filter the data so that only rats that did drink remain. Default value is False.
-                Example: True or False
+            lick: bool or None
+                True - gather only data where a rat perform licks.
+                False - take only data without drinking.
+                None - all data upload regardless drinking.
+                Default is None.
             replacing_value: float or 'auto'
                 Float number of seconds. The number of seconds after each visit during which the visits of followers are
                 counted. Default value is 'auto'.
@@ -2162,22 +2310,28 @@ class RBCA:
             time_start: str
                 Particular start time to download the data (if your 'start' is less than the original start time 
                 in the file, 'start' will equal to the original start time). Default value is None.
-                Example: '12:30:45' (12 hours 30 minutes 45 seconds)
+                Example: '12:30:45' or '2022-01-01_00:00:00' 
             time_finish: str
                 Particular finish time to download the data (if your 'finish' is higher than the original finish time 
                 in the file, 'finish' will be equal to the original finish time). Default value is None.
-                Example: '12:30:45'
-            intellicage: dict
-                It is dictionary where you put intellicage_parser's parameters (See the 'intellicage_parser' method).
-                Default value is None.              
-                Example: {'illumination':'all_time', 
+                Example: '12:30:45' or '2022-01-01_00:00:00'
+            intellicage: bool or 'all_time'
+                See 'illumination' parameter in intellicage_parser signature.
+                Example: True, False or 'all_time'
+            condition: dict
+                Dictionary where keys are stage names and values are parameters for the 'parser' method
+                    (customizable, see in this method code).
+                Example: {'stage1': True} ('without_dem' = True)
+            parser_condition: dict
+                It is dictionary where you put parser's parameters (See the 'parser' method).
+                Default value is None.
+                Example: {'illumination':'all_time',
                           'condition': {'session1':'last_day',
                                         'session2':'last_day',
                                         'session3':'first_day',
                                         'date':time}}
-            condition: dict
-                Dictionary where keys are stage names and values are parameters for the 'parser' method (customizable).
-                Example: {'stage1': True} ('without_dem' = True)
+                This parameter is fully customizable and can be hardcoded as you wish, see 'customizable' in this class
+                    or parser's code.
             density: bool
                 Parameter density for the histogram. Default value is True.
                 Example: True or False
@@ -2323,10 +2477,11 @@ class RBCA:
 
         return return_dict
 
+
     def eda_target(self,
-                   target_column_name = str,
-                   column_name_for_group = str,
-                   group_func: str = 'sum',
+                   target_column_name: str,
+                   column_name_for_group: str,
+                   group_func = 'sum',
                    lick: bool = None,
                    time: float = None,
                    verbose: bool = False,
@@ -2341,10 +2496,76 @@ class RBCA:
                    size: tuple = (5, 5),
                    hist_range: tuple = (0, 1000)):
         """
-        column_name_for_group - колонка по которой идет группировка
-        target_column_name - название колонки, которую хотим проанализировать
-
-        N.B. Здесь есть customizable
+        ------------
+        Function:
+            Method to analyze specific column in Intellicage data about visits.
+        ------------
+        Parameters:
+            column_name_for_group: str
+                The column that the grouping is based on (in pandas.DataFrame from Intellicage data)
+                Example: 'column1'
+            target_column_name:
+                The name of the column that we want to analyze
+                Example: 'column2'
+            group_func:
+                Grouping function, via str pandas notation or any function for dataframes.
+                Example: 'mean','sum'
+                Default: 'sum'
+            lick: bool or None
+                True - gather only data where a rat perform licks.
+                False - take only data without drinking.
+                None - all data upload regardless drinking.
+                Default is None.
+            time: float
+                Time (minutes only) since the beginning of the file. Default value is None.
+                Example: 30 or 30.5
+            verbose: bool
+                Displaying information while the algorithm is running. Default value is False.
+                Example: True or False
+            without_dem: bool
+                Removing rows where demonstrator is. Default value is False.
+                Example: True or False
+            time_start: str
+                Particular start time to download the data (if your 'start' is less than the original start time
+                in the file, 'start' will equal to the original start time). Default value is None.
+                Example: '12:30:45' or '2022-01-01_00:00:00' 
+            time_finish: str
+                Particular finish time to download the data (if your 'finish' is higher than the original finish time
+                in the file, 'finish' will be equal to the original finish time). Default value is None.
+                Example: '12:30:45' or '2022-01-01_00:00:00'
+            intellicage: bool or 'all_time'
+                See 'illumination' parameter in intellicage_parser signature.
+                Example: True, False or 'all_time'
+            condition: dict
+                Dictionary where keys are stage names and values are parameters for the 'parser' method
+                    (customizable, see in this method code).
+                Example: {'stage1': True} ('without_dem' = True)
+            parser_condition: dict
+                It is dictionary where you put parser's parameters (See the 'parser' method).
+                Default value is None.
+                Example: {'illumination':'all_time',
+                          'condition': {'session1':'last_day',
+                                        'session2':'last_day',
+                                        'session3':'first_day',
+                                        'date':time}}
+                This parameter is fully customizable and can be hardcoded as you wish, see 'customizable' in this class
+                    or parser's code.
+            density: bool
+                Parameter density for the histogram. Default value is True.
+                Example: True or False
+            bins: int
+                The number of bins in the histogram. Default value is 12.
+                Example: 10 or 20
+            size: tuple
+                Tuple with the size parameters in form of (width, height). Default value is (5,5).
+                Example: (10,10)
+            hist_range: tuple
+                The range for the horizontal axis in the histogram.
+                Default value is (0,1000)
+                Example: (50,100)
+        ------------
+        Return:
+            Dictionary where keys - stages, values - pandas.DataFrame with needed data
         """
 
         return_dict = {}
@@ -2386,10 +2607,10 @@ class RBCA:
             base = pd.concat([*bases.values()], ignore_index=True)
             base = base.groupby([column_name_for_group]).agg({target_column_name: group_func})
 
-            for tags in tags_in_animal.values():
-                for tag in tags:
-                    if tag not in base.index and tag is not None:
-                        base.loc[tag] = 0
+            # for tags in tags_in_animal.values():
+            #     for tag in tags:
+            #         if tag not in base.index and tag is not None:
+            #             base.loc[tag] = 0
 
             return_dict[stage] = base
 
@@ -2414,6 +2635,7 @@ class RBCA:
 
         return return_dict
 
+
     @staticmethod
     def series_changer(x: pd.Series,
                        y: pd.Series,
@@ -2421,11 +2643,32 @@ class RBCA:
                        funk_to_print=print,
                        verbose: bool = True):
         """
-        ДЕФОЛТНОЕ ПОВЕДЕНИЕ ДЕЛИТИНГ
-
-        value_instead_of_none:
-            Возможные значения: None, {'x':None,'y':2}
+        ------------
+        Function:
+            Method to compare two pandas.Series for statistical testing.
+            Adding empty indexes or deleting unnecessary.
+        ------------
+        Parameters:
+            x: pandas.Series
+                First series with values.
+            y: pandas.Series
+                Second series to compare with the first one.
+            value_instead_of_none: Any
+                Value to add for empty rat tag.
+                Example: {'x':None, 'y':2}
+                Default is None.
+            funk_to_print:
+                Function to print or record events.
+                Default is print.
+            verbose: bool
+                Default is True.
+        ------------
+        Return:
+        ------------
+        Pay attention:
+            If value_instead_of_none is None than the behaviour of this method is deleting.
         """
+
         _x = x.copy()
         _y = y.copy()
 
@@ -2461,6 +2704,7 @@ class RBCA:
 
         return _x, _y
 
+
     def permutation(self,
                     x: pd.Series,
                     y: pd.Series,
@@ -2472,18 +2716,43 @@ class RBCA:
                     verbose: bool = False,
                     **kwargs):
         """
-        https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.permutation_test.html
-
-        def series_changer(x: pd.Series,
-                           y: pd.Series,
-                           value_instead_of_none: int = 0,
-                           func_to_print=print)
-
-        in this method:
-        _x, _y = self.series_changer(x,y,**kwargs)
-
-        NB: maximum two samples
+        ------------
+        Function:
+            Method to perform the permutation test.
+            See also https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.permutation_test.html
+        ------------
+        Parameters:
+            x,y: pandas.Series
+                Serieses to compare.
+            statistic:
+                Statistics to check via permutation test between two groups.
+                Default is np.nanmedian.
+            permutation_type: str
+                Interaction type between two samples.
+                Default is 'independent'.
+            n_resamples: int
+                Number of permutation.
+                If None than evaluate automatically.
+                Default is None.
+            alternative: str
+                Statistical alternative.
+                Default is 'two-sided'.
+            title: str
+                Title for printing.
+                Default is None.
+            verbose: bool
+                Printing.
+                Default is False.
+            **kwargs:
+                Remaining arguments for series_changer. See series_changer method.
+        ------------
+        Return:
+            Tuple with transformed x,y and result (return by scipy.stats.permutation_test)
+        ------------
+        Pay attention:
+            Maximum two samples can be compared.
         """
+
         _x, _y = x.copy(), y.copy()
         if permutation_type == 'samples' or permutation_type == 'pairing':
             _x, _y = self.series_changer(x,y,verbose=verbose,**kwargs)
@@ -2511,6 +2780,7 @@ class RBCA:
 
         return _x, _y, result
 
+
     def wilcoxon(self,
                  x: pd.Series,
                  y: pd.Series,
@@ -2520,15 +2790,34 @@ class RBCA:
                  verbose: bool = False,
                  **kwargs):
         """
-        https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.wilcoxon.html
-
-        def series_changer(x: pd.Series,
-                           y: pd.Series,
-                           value_instead_of_none: int = 0,
-                           func_to_print=print)
-
-        in this method:
-        _x, _y = self.series_changer(x,y,**kwargs)
+        ------------
+        Function:
+            Method to perform the wilcoxon test.
+            See also https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.wilcoxon.html
+        ------------
+        Parameters:
+            x,y: pandas.Series
+                Serieses to compare.
+            alternative: str
+                Statistical alternative.
+                Default is 'two-sided'.
+            zero_method: str
+                Method to handle with zero data in series.
+                Default is 'zsplit'.
+            title: str
+                Title for printing.
+                Default is None.
+            verbose: bool
+                Printing.
+                Default is False.
+            **kwargs:
+                Remaining arguments for series_changer. See series_changer method.
+        ------------
+        Return:
+            Tuple with transformed x,y and result (return by scipy.stats.wilcoxon)
+        ------------
+        Pay attention:
+            Maximum two samples can be compared.
         """
 
         _x, _y = self.series_changer(x,y,**kwargs)
@@ -2545,6 +2834,7 @@ class RBCA:
         self.to_log(result)
 
         return _x, _y, result
+
 
     def timeline(self,
                  metric: str,
@@ -2564,20 +2854,103 @@ class RBCA:
                  dynamic: bool = True,
                  intellicage=None,
                  parser_condition: dict = None,
-                 stat: bool = True,
                  division_coef: float = 1,
                  plotly_verbose: bool = True,
                  output_file: str = 'html'):
         """
-        metric:
+        ------------
+        Function:
+            Form some useful metrics of rat behaviour.
+            Metrics:
             gcc (giant cluster component)
             dem_power (number of the edges from a dem)
             visit_density (gantt chart on visits time)
             free_bowls_time (gantt chart on non-visit time)
-
-        step в минутах (используется для gcc и dem_power в динамических графах)
-
+        ------------
+        Parameters:
+            metric: str
+                Values: 'gcc','dem_power','visit_density','free_bowls_time'
+            start: str
+                Particular start time to download the data (if your 'start' is less than the original start time
+                in the file, 'start' will equal to the original start time). Default value is None.
+                Example: '12:30:45' or '2022-01-01_00:00:00'
+            finish: str
+                Particular finish time to download the data (if your 'finish' is higher than the original finish time
+                in the file, 'finish' will be equal to the original finish time). Default value is None.
+                Example: '12:30:45' or '2022-01-01_00:00:00' or '2022-01-01_00:00:00'
+            slide: float
+                Slice (minute time slide) to make one frame for dynamic graph.
+                Example: 30 or 35.5
+            step: float
+                Step (minutes) to move time slide of the graph (used for gcc and dem_power in dynamic charts).
+                Example: 10 or 15.5
+            time_start_median: str
+                Specific start time (format is like start) to evaluate median for statistics
+                Default is None.
+            time_finish_median: str
+                Specific finish time (format is like finish) to evaluate median for statistics
+                Default is None.
+            lick: bool or None
+                True - gather only data where a rat perform licks.
+                False - take only data without drinking.
+                None - all data upload regardless drinking.
+                Default is None.
+            time: float
+                Time (minutes only) since the beginning of the file. Default value is None.
+                Example: 30 or 30.5
+            replacing_value: float or 'auto'
+                Float number of seconds. The number of seconds after each visit during which the visits of followers are
+                counted. Default value is 'auto'.
+                Example: 12,4 or 30
+            without_dem_base: bool
+                Removing rows where demonstrator is. Default value is False.
+                Example: True or False
+            input_time_interval: float or 'auto'
+                Float number of seconds or flag 'auto'. The number of seconds after each visit during which the visits
+                of followers are counted. If 'auto', time interval for observing followers' visits will be evaluated
+                automatically. Default value is 'auto'.
+                Example: 'auto' or 12.5 or 50
+            delete_zero_in_intervals_for_median: bool
+                Deleting zeros in the median calculation or not. Default value is True.
+                Example: True of False
+            median_special_time: bool
+                Way to calculate the median of visits. If True, it is evaluated on all data connected with the
+                particular group. Default value is True.
+                Example: True or False
+            dynamic: bool
+                Using 'dynamic' mode, when you want to make a graph with Plotly Time Slider. Default value is false.
+                Example: True or False
+            intellicage: bool or 'all_time'
+                See 'illumination' parameter in intellicage_parser signature.
+                Example: True, False or 'all_time'
+            parser_condition: dict
+                It is dictionary where you put parser's parameters (See the 'parser' method).
+                Default value is None.
+                Example: {'illumination':'all_time',
+                          'condition': {'session1':'last_day',
+                                        'session2':'last_day',
+                                        'session3':'first_day',
+                                        'date':time}}
+                This parameter is fully customizable and can be hardcoded as you wish, see 'customizable' in this class
+                    or parser's code.
+            division_coef: float
+                Float number to divide (normalize) metrics (node susceptibility, credibility, graph_weight).
+                Default value is None.
+                Example: 48 or 15.5
+            plotly_verbose: bool
+                Visualizing all graphs in notebook.
+                Default is True
+            output_file: str
+                Format of the output file. See iplot method for plotly. Can be 'png','html' and so on.
+                Default is 'html'.
+        ------------
+        Return:
+            None
+        ------------
+        Side effect:
+            Files with charts.
         """
+
         if metric == 'gcc' or metric == 'dem_power':
             _ = self.dynamic_graphs(start=start,
                                     finish=finish,
@@ -2595,7 +2968,6 @@ class RBCA:
                                     dynamic=dynamic,
                                     intellicage=intellicage,
                                     parser_condition=parser_condition,
-                                    stat=stat,
                                     division_coef=division_coef)
 
             data = pd.DataFrame(self.log['graph_analysis'])
@@ -2755,7 +3127,7 @@ class RBCA:
 
                     fig.update_layout(template='plotly_white')
                     fig.update_traces(marker=dict(color='black'))
-                    # fig.update_xaxes(linecolor='black')               # мешало денситометрии
+                    # fig.update_xaxes(linecolor='black')               # interfered with densitometry
                     # fig.update_yaxes(linecolor='black')
 
                     if plotly_verbose:
