@@ -34,7 +34,6 @@ from datetime import datetime
 from functools import reduce
 import plotly.express as px
 from plotly.offline import iplot
-from scipy.stats import permutation_test
 from math import factorial
 
 
@@ -2767,7 +2766,7 @@ class RBCA:
             else:
                 n_resamples = factorial(len(_x))
 
-        result = permutation_test(data=(_x, _y),
+        result = stats.permutation_test(data=(_x, _y),
                                   statistic=statistic,
                                   permutation_type=permutation_type,
                                   n_resamples=n_resamples,
