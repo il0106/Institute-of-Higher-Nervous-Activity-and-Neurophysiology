@@ -574,14 +574,6 @@ class RBCA:
                                                   (self.animal_file['Group'] == name_group),
                                                   'Animal ID'])))
 
-        if name_stage not in self.log['inner_tags']:
-            self.log['inner_tags'][name_stage] = {name_base:{}}
-        for i in list(self.animal_file.loc[self.animal_file['Group'] == name_group, 'Animal ID']):
-            if name_base not in self.log['inner_tags'][name_stage]:
-                self.log['inner_tags'][name_stage][name_base]={}
-            self.log['inner_tags'][name_stage][name_base][i] = self.global_oper
-            self.global_oper += 1
-
         base['Tag'] = base['Tag'].astype(str)
 
         dem_in_base = []
@@ -593,15 +585,31 @@ class RBCA:
                 if without_dem:
                     base_list.remove(i)
 
+        if without_dem:
+            base_out_dem = base[~base['Tag'].isin(dem_in_base)]
+        else:
+            for i in dem_in_base:
+                base['Tag'].replace(i, 'dem_'+i, inplace=True)
+            base_out_dem = base
+
+        dem_in_base = ['dem_'+x for x in dem_in_base]
+        base_list = ['dem_'+x if x in str(dem_in_base) else x for x in base_list]
+
+        if name_stage not in self.log['inner_tags']:
+            self.log['inner_tags'][name_stage] = {name_base:{}}
+        for i in list(self.animal_file.loc[self.animal_file['Group'] == name_group, 'Animal ID']):
+            if name_base not in self.log['inner_tags'][name_stage]:
+                self.log['inner_tags'][name_stage][name_base]={}
+            if i in str(dem_in_base):
+                self.log['inner_tags'][name_stage][name_base]['dem_'+i] = self.global_oper
+            else:
+                self.log['inner_tags'][name_stage][name_base][i] = self.global_oper
+            self.global_oper += 1
+
         self.log['demonstrators'][name_base] = dem_in_base
         self.to_log(f'\nThe demonstrator in {name_base} - {dem_in_base}')
 
-        base.index = base['Tag']
-
-        if without_dem:
-            base_out_dem = base.drop(dem_in_base, axis=0)
-        else:
-            base_out_dem = base
+        base_out_dem.index = base_out_dem['Tag']
 
         if name_stage not in self.log['without_dem']:
             self.log['without_dem'][name_stage] = {name_base: without_dem}
@@ -2204,11 +2212,6 @@ class RBCA:
             for name_base in file_names:
                 name_group = name_base.split(' ')[0]
 
-                tags_in_animal[name_base] = \
-                    self.animal_file[self.animal_file['Group']==name_group]\
-                    [self.animal_file['Demonstrator']=='0']['Animal ID'].to_list() if final_without_dem else \
-                    self.animal_file[self.animal_file['Group'] == name_group]['Animal ID'].to_list()
-
                 bases[name_base], \
                 bases_tags[name_base], \
                 bases_dem_tags[name_base] = self.parser(name_base=name_base,
@@ -2221,6 +2224,8 @@ class RBCA:
                                                         time_finish=time_finish,
                                                         intellicage=intellicage,
                                                         condition=parser_condition)
+
+                tags_in_animal[name_base] = list(self.log['inner_tags'][stage][name_base])
 
             base = pd.concat([*bases.values()], ignore_index=True)
             base = base.groupby(['Tag']).count()
