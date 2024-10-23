@@ -3,7 +3,7 @@
 
 ## Russian Academy of Sciences
 # Institute of Higher Nervous Activity and Neurophysiology
-This repository is related to my work at the Institute of Higher Nervous Activity and Neurophysiology. 
+This repository is related to work at the Institute of Higher Nervous Activity and Neurophysiology. 
 Key words: mice, mouse, PyMICE, IntelliCage, behavior, behavioral contagion, graphs, pyviz, networkx, permutation test, wilcoxon test
 
 The main module (yet) is 'ratcontagion'. This module contains RBCA class (Rat behavioral contagion analyzer) that helps analyze visit data from the IntelliCage system to research behavioral contagion among rats.
@@ -19,6 +19,3 @@ The main module (yet) is 'ratcontagion'. This module contains RBCA class (Rat be
 3) See the tutorial.ipynb with the useful examples, also check cookbook.ipynb
 4) Try to import ratcontagion.py module with RBCA class and work with it
 5) Observe requirements.txt, also know that the python version of the lib is 3.9.7
-
-### A little bit about my role in the studies
-My roles are programming, data analysis, mathematical statistics and visualisation. The main reason of my participation is my personal interest, bacause I have a possibility to work with real scientists and do some things as one of the first in the niche of these studies. Of course, these studies have helped me improve my understanding of mathematical statistics, as well as some visualization features.
