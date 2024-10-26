@@ -98,6 +98,7 @@ class RBCA:
                     'tags_out_bounds': {},
                     'inner_tags':{}}
         self.global_oper = 0
+        self.dem_prefix = 'dem_'
 
         if not show_warnings:
             warnings.filterwarnings("ignore")
@@ -444,7 +445,7 @@ class RBCA:
         ------------
         Function:
             Parsing your html-file (that is built via the IntelliCage) or
-            parsing original IntelliСage output archives.
+            parsing original IntelliCage output archives.
         ------------
         Parameters:
             name_base: str
@@ -573,37 +574,35 @@ class RBCA:
         dems = list(set(list(self.animal_file.loc[(self.animal_file['Demonstrator'] == '1') &
                                                   (self.animal_file['Group'] == name_group),
                                                   'Animal ID'])))
-
+        
         base['Tag'] = base['Tag'].astype(str)
 
-        dem_in_base = []
-        base_list = list(base['Tag'].unique())
-
         for i in dems:
-            if i in base_list:
-                dem_in_base.append(i)
-                if without_dem:
-                    base_list.remove(i)
+            if self.dem_prefix in i:
+                i = i[len(self.dem_prefix):]
+            base['Tag'].replace(i, self.dem_prefix+i, inplace=True)
 
-        if without_dem:
-            base_out_dem = base[~base['Tag'].isin(dem_in_base)]
-        else:
-            for i in dem_in_base:
-                base['Tag'].replace(i, 'dem_'+i, inplace=True)
-            base_out_dem = base
+            if without_dem:
+                base = base[base['Tag']!=self.dem_prefix+i]
+       
+        base_out_dem = base
 
-        dem_in_base = ['dem_'+x for x in dem_in_base]
-        base_list = ['dem_'+x if x in str(dem_in_base) else x for x in base_list]
+        self.animal_file.loc[(self.animal_file['Demonstrator'] == '1') & (self.animal_file['Group'] == name_group),'Animal ID'] = \
+            self.animal_file.loc[(self.animal_file['Demonstrator'] == '1') & (self.animal_file['Group'] == name_group),'Animal ID'].map(
+                lambda x: self.dem_prefix + x if self.dem_prefix not in x else x
+            )
+
+        dem_in_base = [x for x in set(base_out_dem['Tag']) if self.dem_prefix in x]
+        base_list = list(set(base_out_dem['Tag']))
 
         if name_stage not in self.log['inner_tags']:
             self.log['inner_tags'][name_stage] = {name_base:{}}
-        for i in list(self.animal_file.loc[self.animal_file['Group'] == name_group, 'Animal ID']):
+
+        for i in list(set(list(self.animal_file.loc[self.animal_file['Group'] == name_group, 'Animal ID']))):
             if name_base not in self.log['inner_tags'][name_stage]:
                 self.log['inner_tags'][name_stage][name_base]={}
-            if i in str(dem_in_base):
-                self.log['inner_tags'][name_stage][name_base]['dem_'+i] = self.global_oper
-            else:
-                self.log['inner_tags'][name_stage][name_base][i] = self.global_oper
+            
+            self.log['inner_tags'][name_stage][name_base][i] = self.global_oper
             self.global_oper += 1
 
         self.log['demonstrators'][name_base] = dem_in_base
@@ -737,12 +736,10 @@ class RBCA:
                 else:
                     finish = start + pd.offsets.DateOffset(seconds=time_interval)
 
-                filtered_df = data_.loc[(data_['Tag'] != tag) & (
-                        (data_['_StartTime'] >= start) & (data_['_StartTime'] <= finish))].copy()
+                filtered_df = data_.loc[(data_['Tag'] != tag) & ((data_['_StartTime'] >= start) & (data_['_StartTime'] <= finish))].copy()
                 filtered_df.sort_values('_StartTime', inplace=True)
 
                 if len(filtered_df) != 0:
-                    filtered_df.sort_values('_StartTime', inplace=True)
                     needed_tag = filtered_df.iloc[0]['Tag']
                     df_for_tag.loc[needed_tag, name_column] = df_for_tag.loc[needed_tag, name_column] + 1
 
@@ -917,9 +914,9 @@ class RBCA:
         else:
             final_dict = list(corners_dict.values())[0]
 
-        if not dynamic:
+        if not dynamic:         
             for k, v in final_dict.items():
-
+                
                 file_name = list(v.columns)[0].split('_')[-1]
                 stage_name = None
                 for stage in self.dict_names:
@@ -928,16 +925,16 @@ class RBCA:
                 if stage_name is None:
                     self.to_log(f'{stage_name} is not founded in {list(v.columns)[0]}')
 
-                int_k = int(k)
-                if int_k in net.get_nodes():
-                    int_k = self.log['inner_tags'][stage_name][file_name][k]
-
-                if k in dem_tags:
-                    net.add_node(int_k, label=str(k), color='yellow', title=f'{v}', shape='star')
-                elif k in str(self.log['tags_out_bounds'][stage_name][file_name]) and v.sum()[0]==0:
-                    net.add_node(int_k, label=str(k), color='grey', title=f'{v}', shape = 'diamond')
+                str_k = str(k)   #'dem_' + str(k) if str(k) in str(dem_tags) and 'dem_' not in str(k) else str(k) 
+                if str_k in net.get_nodes():
+                    str_k = str(self.log['inner_tags'][stage_name][file_name][str_k])
+                        
+                if 'dem_' in str(k):
+                    net.add_node(str_k, label=str(k), color='yellow', title=f'{v}', shape='star')
+                elif str(k) in str(self.log['tags_out_bounds'][stage_name][file_name]) and v.sum()[0]==0:
+                    net.add_node(str_k, label=str(k), color='grey', title=f'{v}', shape = 'diamond')
                 else:
-                    net.add_node(int_k, label=str(k), color='red', title=f'{v}')
+                    net.add_node(str_k, label=str(k), color='red', title=f'{v}')
 
             sup_graph_list = []
             for k, v in final_dict.items():
@@ -949,16 +946,16 @@ class RBCA:
                         stage_name = stage
                 if stage_name is None:
                     self.to_log(f'{stage_name} is not founded in {list(v.columns)[0]}')
-
-                int_k = int(k)
-                if self.log['inner_tags'][stage_name][file_name][k] in net.get_nodes():
-                    int_k = self.log['inner_tags'][stage_name][file_name][k]
+                
+                str_k = str(k)
+                if self.log['inner_tags'][stage_name][file_name][str_k] in net.get_nodes():
+                    str_k = self.log['inner_tags'][stage_name][file_name][str_k]
 
                 for tag in v.index:
                     if v.loc[tag, name_column] == 0:
-                        sup_graph_list.append([int_k, int(tag)])
+                        sup_graph_list.append([str_k, tag])
                     else:
-                        net.add_edge(int_k, int(tag), value=0.01 * int(v.loc[tag, name_column]), color='blue')
+                        net.add_edge(str_k, tag, value=0.01 * int(v.loc[tag, name_column]), color='blue')
             for pair in sup_graph_list:
                 net.add_edge(pair[0], pair[1], hidden=True)
 
@@ -3076,13 +3073,7 @@ class RBCA:
                                                                          start_of_slice,
                                                                          finish_for_empty]
 
-                    data_from_parser[0]['Tag_Corner'] = data_from_parser[0]['Tag']. \
-                                                            apply(lambda x: str(int(x)) \
-                        if x not in self.log['demonstrators'][file_name] else str(int(x))+' (dem) '
-                                                                  ) + \
-                                                        ' (' + data_from_parser[0]['Corner']. \
-                                                            apply(lambda x: str(int(x))) + \
-                                                        ')'
+                    data_from_parser[0]['Tag_Corner'] = data_from_parser[0]['Tag'] + ' (' + data_from_parser[0]['Corner'].map(lambda x: str(int(x))) + ')'
 
                     sup_list_for_plot = []
                     for index, row in data_from_parser[0].iterrows():
@@ -3114,7 +3105,7 @@ class RBCA:
                         for stage_, files_dict in parser_condition.items():
                             if files_dict.get(file_name):
                                 condition_str_divided = files_dict[file_name].split('|')
-                                if len(condition_str_divided )==3: # стандартное условие с time
+                                if len(condition_str_divided )==3: # standard condition with time
                                     start_for_plot = datetime.strptime(condition_str_divided[1],'%Y-%m-%d_%H:%M:%S')
                                     finish_for_plot = datetime.strptime(condition_str_divided[2],'%Y-%m-%d_%H:%M:%S')
                                     break
