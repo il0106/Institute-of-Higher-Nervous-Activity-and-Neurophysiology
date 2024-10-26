@@ -1,6 +1,3 @@
-
-![Logo](https://upload.wikimedia.org/wikipedia/ru/4/43/Ivnd_logo.png)
-
 ## Russian Academy of Sciences
 # Institute of Higher Nervous Activity and Neurophysiology
 This repository is related to work at the Institute of Higher Nervous Activity and Neurophysiology. 
